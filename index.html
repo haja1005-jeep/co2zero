@@ -3,362 +3,267 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>카카오맵 + 브이월드 지적도 연동</title>
+    <title>스마트 탄소중립 트리맵 (Kakao)</title>
     <style>
-        body { margin: 0; padding: 0; }
-        #map { width: 100%; height: 100vh; }
-        .loading {
-            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            z-index: 999; background: rgba(0,0,0,0.7); color: white;
-            padding: 10px 20px; border-radius: 5px; display: none;
+        body { margin: 0; padding: 0; font-family: 'Noto Sans KR', sans-serif; overflow: hidden; }
+        
+        /* 지도 전체 화면 */
+        #map { width: 100vw; height: 100vh; z-index: 1; }
+
+        /* 대시보드 패널 (좌측 상단) */
+        .dashboard-panel {
+            position: absolute; top: 20px; left: 20px; width: 280px;
+            background: rgba(20, 30, 48, 0.9);
+            color: #fff; padding: 20px; border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5); z-index: 10;
+            backdrop-filter: blur(5px);
         }
-        .error-msg {
-            position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
-            z-index: 1000; background: #ff4444; color: white;
-            padding: 10px 20px; border-radius: 5px; display: none;
-            max-width: 80%;
-        }
-        .info-msg {
-            position: absolute; top: 10px; right: 10px;
-            z-index: 1000; background: rgba(0,0,0,0.7); color: white;
-            padding: 10px; border-radius: 5px; font-size: 12px;
-        }
+        .panel-title { font-size: 18px; font-weight: bold; margin-bottom: 15px; border-bottom: 1px solid #444; padding-bottom: 10px; }
+        .stat-item { margin-bottom: 15px; display: flex; justify-content: space-between; align-items: flex-end; }
+        .stat-label { font-size: 13px; color: #ccc; }
+        .stat-value { font-size: 24px; font-weight: bold; color: #00e676; }
+        .stat-unit { font-size: 14px; color: #fff; margin-left: 2px; }
+
+        /* 인포윈도우 & 오버레이 스타일 */
+        .iw-container { padding: 5px; width: 200px; font-family: 'Noto Sans KR', sans-serif; }
+        .iw-header { font-size: 14px; font-weight: bold; border-bottom: 1px solid #eee; padding-bottom: 8px; margin-bottom: 8px; color: #333; display: flex; justify-content: space-between; align-items: center; }
+        .iw-status { font-size: 11px; padding: 2px 6px; border-radius: 4px; color: #fff; }
+        .iw-row { display: flex; justify-content: space-between; font-size: 12px; color: #666; margin-bottom: 4px; }
+        .iw-carbon-box { margin-top: 10px; background-color: #e8f5e9; padding: 8px; border-radius: 6px; text-align: center; }
+        .iw-carbon-label { font-size: 11px; color: #2e7d32; margin-bottom: 2px; }
+        .iw-carbon-value { font-size: 16px; font-weight: 800; color: #00c853; }
+
+        /* 구역 정보 오버레이 */
+        .zone-overlay { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 15px rgba(0,0,0,0.2); min-width: 200px; position: relative; bottom: 10px; }
+        .zone-title { margin: 0 0 10px 0; color: #333; font-size: 15px; font-weight: bold; border-bottom: 2px solid #00c853; padding-bottom: 5px; }
+        .zone-stats { font-size: 12px; color: #555; }
+        .zone-stat-row { display: flex; justify-content: space-between; margin-bottom: 4px; border-bottom: 1px dashed #eee; padding-bottom: 2px; }
+        .zone-total { margin-top: 10px; padding-top: 8px; border-top: 1px solid #ddd; font-weight: bold; color: #004c80; text-align: right; }
     </style>
 </head>
 <body>
 
-<div id="loading" class="loading">데이터 불러오는 중...</div>
-<div id="error" class="error-msg"></div>
-<div class="info-msg">
-    줌 레벨: <span id="zoomLevel">1</span><br>
-    (지적도는 1~5 레벨에서 표시)
-</div>
-<div id="map"></div>
+    <div class="dashboard-panel">
+        <div class="panel-title">🌳 스마트 탄소 관제</div>
+        <div class="stat-item">
+            <span class="stat-label">관리 중인 수목</span>
+            <div><span id="stat-tree-count" class="stat-value">0</span> <span class="stat-unit">그루</span></div>
+        </div>
+        <div class="stat-item">
+            <span class="stat-label">연간 탄소 흡수</span>
+            <div><span id="stat-carbon" class="stat-value">0</span> <span class="stat-unit">kg</span></div>
+        </div>
+        <div class="stat-item">
+            <span class="stat-label">승용차 상쇄</span>
+            <div><span id="stat-cars" class="stat-value" style="color:#29b6f6;">0</span> <span class="stat-unit">대</span></div>
+        </div>
+        <div style="margin-top:20px; font-size:12px; color:#888; text-align:center;">
+            * 실시간 데이터 기반 (Live)
+        </div>
+    </div>
 
-<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-<script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey=257fdd3647dd6abdb05eae8681106514&libraries=clusterer,services"></script>
-  
-<script>
-    // ==========================================
-    // 1. 설정값
-    // ==========================================
-    const VWORLD_KEY = 'ACEB012E-C384-3176-BC45-4D4CAE466B1E';
-    const MAX_ZOOM_LEVEL = 5;
-    let isLoading = false;
-    
-    // ==========================================
-    // 2. 지도 초기화
-    // ==========================================
-    var mapContainer = document.getElementById('map');
-    var mapOption = { 
-        center: new kakao.maps.LatLng(34.8118, 126.4057), 
-        level: 1
-    };
-    var map = new kakao.maps.Map(mapContainer, mapOption);
+    <div id="map"></div>
 
-    var polygons = [];
-    var currentInfowindow = null;
+    <script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey=257fdd3647dd6abdb05eae8681106514&libraries=clusterer,services"></script>
 
-    // 줌 레벨 표시
-    document.getElementById('zoomLevel').textContent = map.getLevel();
+    <script>
+        // 1. 지도 초기화
+        var container = document.getElementById('map');
+        var options = {
+            center: new kakao.maps.LatLng(34.8118, 126.4057), // 목포 중심
+            level: 3
+        };
+        var map = new kakao.maps.Map(container, options);
 
-    // ==========================================
-    // 3. 에러 표시 함수
-    // ==========================================
-    function showError(message) {
-        const errorDiv = $('#error');
-        errorDiv.html(message).fadeIn();
-        setTimeout(() => errorDiv.fadeOut(), 5000);
-    }
+        // 지도 컨트롤
+        var mapTypeControl = new kakao.maps.MapTypeControl();
+        map.addControl(mapTypeControl, kakao.maps.ControlPosition.TOPRIGHT);
+        var zoomControl = new kakao.maps.ZoomControl();
+        map.addControl(zoomControl, kakao.maps.ControlPosition.RIGHT);
 
-    // ==========================================
-    // 4. 브이월드 데이터 요청 함수
-    // ==========================================
-    function getData() {
-        const currentLevel = map.getLevel();
-        document.getElementById('zoomLevel').textContent = currentLevel;
+        // 지적도 토글 버튼
+        var useDistrict = false;
+        var btnControl = document.createElement('div');
+        btnControl.style.cssText = 'position:absolute; top:10px; right:120px; z-index:999;';
+        btnControl.innerHTML = `
+            <button onclick="toggleCadastral()" style="
+                background:#fff; border:1px solid #ccc; padding:6px 10px; 
+                border-radius:4px; font-weight:bold; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.2);">
+                🔲 지적도 보기
+            </button>
+        `;
+        document.body.appendChild(btnControl);
 
-        if (currentLevel > MAX_ZOOM_LEVEL) {
-            console.log("지도를 더 확대해주세요. (현재 레벨: " + currentLevel + ")");
-            removePolygons();
-            return;
+        function toggleCadastral() {
+            useDistrict = !useDistrict;
+            if (useDistrict) map.addOverlayMapTypeId(kakao.maps.MapTypeId.USE_DISTRICT);
+            else map.removeOverlayMapTypeId(kakao.maps.MapTypeId.USE_DISTRICT);
         }
 
-        if (isLoading) {
-            console.log("이미 데이터를 불러오는 중입니다.");
-            return;
-        }
-
-        isLoading = true;
-        $('#loading').show();
-
-        var bounds = map.getBounds();
-        var sw = bounds.getSouthWest();
-        var ne = bounds.getNorthEast();
-        var bbox = `${sw.getLng()},${sw.getLat()},${ne.getLng()},${ne.getLat()}`;
-
-        console.log("=== 요청 정보 ===");
-        console.log("BBOX:", bbox);
-        console.log("현재 줌 레벨:", currentLevel);
-
-        // 브이월드 WFS 방식 (format_options 사용)
-        const params = {
-            service: 'WFS',
-            version: '2.0.0',
-            request: 'GetFeature',
-            typeName: 'lp_pa_cbnd_bubun',
-            srsName: 'EPSG:4326',
-            bbox: bbox,
-            output: 'text/javascript',
-            format_options: 'callback:parseData',
-            exceptions: 'text/javascript',
-            key: VWORLD_KEY
+        // 수종별 이름 매핑
+        const speciesName = {
+            'pine': '🌲 소나무', 'zelkova': '🌳 느티나무',
+            'ginkgo': '🍂 은행나무', 'cherry': '🌸 벚나무', 'default': '🌱 기타'
         };
 
-        const url = "https://api.vworld.kr/req/wfs?" + $.param(params);
-        console.log("요청 URL:", url);
-
-        // JSONP script 태그 방식
-        const script = document.createElement('script');
-        script.src = url;
-        script.id = 'vworld-script';
-        
-        script.onerror = function() {
-            console.error("=== 스크립트 로드 실패 ===");
-            showError("브이월드 API 연결 실패<br>API 키를 확인해주세요.");
-            $('#loading').hide();
-            isLoading = false;
-            if (document.getElementById('vworld-script')) {
-                document.head.removeChild(script);
-            }
-        };
-
-        script.onload = function() {
-            console.log("스크립트 로드 성공");
-        };
-
-        // 타임아웃 (15초)
-        const timeout = setTimeout(() => {
-            console.error("=== 요청 타임아웃 ===");
-            showError("요청 시간 초과");
-            $('#loading').hide();
-            isLoading = false;
-            if (document.getElementById('vworld-script')) {
-                document.head.removeChild(script);
-            }
-        }, 15000);
-
-        // 기존 스크립트 제거
-        const oldScript = document.getElementById('vworld-script');
-        if (oldScript) {
-            document.head.removeChild(oldScript);
-        }
-
-        document.head.appendChild(script);
-    }
-
-    // ==========================================
-    // 5. 전역 콜백 함수 (브이월드가 호출)
-    // ==========================================
-    window.parseData = function(data) {
-        console.log("=== parseData 호출됨 ===");
-        console.log("받은 데이터:", data);
-        
-        clearTimeout(window.vworldTimeout);
-        $('#loading').hide();
-        isLoading = false;
-
-        // 스크립트 태그 제거
-        const script = document.getElementById('vworld-script');
-        if (script) {
-            document.head.removeChild(script);
-        }
-
-        processData(data);
-    };
-
-    // ==========================================
-    // 6. 데이터 처리 및 그리기
-    // ==========================================
-    function processData(data) {
-        removePolygons();
-
-        // 에러 체크
-        if (data.type === 'error' || data.error) {
-            console.error("API 에러:", data);
-            showError("API 오류: " + (data.message || "알 수 없는 오류"));
-            return;
-        }
-
-        // features 찾기
-        let features = data.features;
-        
-        if (!features) {
-            // 다양한 응답 구조 처리
-            if (data.response && data.response.result) {
-                features = data.response.result.featureCollection.features;
-            } else if (data.result) {
-                features = data.result.featureCollection.features;
-            } else if (data.featureCollection) {
-                features = data.featureCollection.features;
-            }
-        }
-
-        if (!features || features.length === 0) {
-            console.log("해당 영역에 데이터가 없습니다.");
-            console.log("전체 데이터 구조:", data);
-            showError("해당 영역에 지적도 데이터가 없습니다.");
-            return;
-        }
-
-        console.log(`${features.length}개의 필지 데이터 처리 시작`);
-
-        let successCount = 0;
-        features.forEach(function(feature, index) {
+        // =========================================
+        // 2. 나무 데이터 로드 (Point)
+        // =========================================
+        async function loadTreeData() {
             try {
-                var geometry = feature.geometry;
-                var props = feature.properties;
-                
-                if (!geometry || !geometry.coordinates) {
-                    return;
+                const response = await fetch('api_trees.php'); 
+                const data = await response.json();
+
+                // 통계 업데이트
+                if(data.stats) {
+                    document.getElementById('stat-tree-count').innerText = data.stats.total_trees;
+                    document.getElementById('stat-carbon').innerText = data.stats.total_carbon;
+                    document.getElementById('stat-cars').innerText = data.stats.car_equivalent;
                 }
 
-                if (geometry.type === 'Polygon') {
-                    drawPolygon(geometry.coordinates[0], props);
-                    successCount++;
-                } else if (geometry.type === 'MultiPolygon') {
-                    geometry.coordinates.forEach(function(coords) {
-                        drawPolygon(coords[0], props);
-                        successCount++;
+                // 마커 아이콘 설정
+                const treeImage = new kakao.maps.MarkerImage(
+                    'https://cdn-icons-png.flaticon.com/512/489/489969.png',
+                    new kakao.maps.Size(35, 35),
+                    { offset: new kakao.maps.Point(17, 35) }
+                );
+
+                data.features.forEach(feature => {
+                    var lat = feature.geometry.coordinates[1];
+                    var lng = feature.geometry.coordinates[0];
+                    var props = feature.properties;
+
+                    var marker = new kakao.maps.Marker({
+                        position: new kakao.maps.LatLng(lat, lng),
+                        map: map,
+                        image: treeImage,
+                        title: props.species // 마우스 오버 시 이름 표시
                     });
+
+                    // 인포윈도우 내용
+                    var statusColor = props.status === 'healthy' ? '#00c853' : '#ff3d00';
+                    var statusText = props.status === 'healthy' ? '양호' : '관리필요';
+                    var spName = speciesName[props.species] || props.species;
+
+                    var iwContent = `
+                        <div class="iw-container">
+                            <div class="iw-header">
+                                <span>${spName}</span>
+                                <span class="iw-status" style="background-color:${statusColor}">${statusText}</span>
+                            </div>
+                            <div class="iw-row"><span>흉고직경</span><span>${props.dbh} cm</span></div>
+                            <div class="iw-row"><span>수고</span><span>${props.height || '-'} m</span></div>
+                            <div class="iw-carbon-box">
+                                <div class="iw-carbon-label">🌱 연간 이산화탄소 흡수량</div>
+                                <div class="iw-carbon-value">${props.co2} kg</div>
+                            </div>
+                        </div>
+                    `;
+
+                    var infowindow = new kakao.maps.InfoWindow({ content : iwContent, removable : true });
+                    kakao.maps.event.addListener(marker, 'click', function() { infowindow.open(map, marker); });
+                });
+
+            } catch (error) { console.error('나무 데이터 로딩 실패:', error); }
+        }
+
+        // =========================================
+        // 3. 구역 데이터 로드 (Polygon & LineString)
+        // =========================================
+        async function loadZoneData() {
+            try {
+                const response = await fetch('api_zones.php');
+                const zones = await response.json();
+
+                zones.forEach(zone => {
+                    var geoType = zone.geometry.type;
+                    var coords = zone.geometry.coordinates;
+                    var props = zone.properties;
+                    var overlayPosition; // 오버레이 띄울 위치
+
+                    // 3-A. 공원 (Polygon) 처리
+                    if (geoType === 'Polygon') {
+                        // Polygon 좌표 구조: [[[lng, lat], ...]] (링 배열)
+                        var path = coords[0].map(c => new kakao.maps.LatLng(c[1], c[0]));
+                        var polygon = new kakao.maps.Polygon({
+                            map: map, path: path,
+                            strokeWeight: 2, strokeColor: '#004c80', strokeOpacity: 0.8,
+                            fillColor: '#00c853', fillOpacity: 0.2
+                        });
+                        overlayPosition = path[0]; // 첫 번째 점을 오버레이 위치로
+                        addZoneEvent(polygon, props, overlayPosition);
+                    } 
+                    // 3-B. 가로수길 (LineString) 처리
+                    else if (geoType === 'LineString') {
+                        // LineString 좌표 구조: [[lng, lat], ...] (점 배열)
+                        var path = coords.map(c => new kakao.maps.LatLng(c[1], c[0]));
+                        var polyline = new kakao.maps.Polyline({
+                            map: map, path: path,
+                            strokeWeight: 8, strokeColor: '#8e44ad', strokeOpacity: 0.6,
+                            strokeStyle: 'solid'
+                        });
+                        overlayPosition = path[Math.floor(path.length / 2)]; // 중간 지점
+                        addZoneEvent(polyline, props, overlayPosition);
+                    }
+                });
+
+            } catch (error) { console.error('구역 데이터 로딩 실패:', error); }
+        }
+
+        // 구역 이벤트 및 오버레이 생성 함수
+        function addZoneEvent(target, props, position) {
+            // 통계 HTML 생성
+            let statsHtml = '';
+            let stats = props.stats || {};
+            if (Object.keys(stats).length === 0) {
+                statsHtml = '<div style="text-align:center; color:#999;">식재된 나무가 없습니다</div>';
+            } else {
+                for (let [code, count] of Object.entries(stats)) {
+                    let name = speciesName[code] || code;
+                    statsHtml += `
+                        <div class="zone-stat-row">
+                            <span>${name}</span>
+                            <span style="font-weight:bold;">${count}주</span>
+                        </div>`;
                 }
-            } catch (e) {
-                console.error(`feature ${index} 처리 오류:`, e);
-            }
-        });
-
-        console.log(`총 ${successCount}개의 폴리곤 그리기 완료`);
-    }
-
-    // ==========================================
-    // 7. 폴리곤 그리기 함수
-    // ==========================================
-    function drawPolygon(rawPath, props) {
-        if (!rawPath || rawPath.length < 3) {
-            return;
-        }
-
-        var path = [];
-
-        for (var i = 0; i < rawPath.length; i++) {
-            if (rawPath[i] && rawPath[i].length >= 2) {
-                path.push(new kakao.maps.LatLng(rawPath[i][1], rawPath[i][0]));
-            }
-        }
-
-        if (path.length < 3) {
-            return;
-        }
-
-        var polygon = new kakao.maps.Polygon({
-            map: map,
-            path: path,
-            strokeWeight: 2,
-            strokeColor: '#004c80',
-            strokeOpacity: 0.8,
-            fillColor: '#fff',
-            fillOpacity: 0.1
-        });
-
-        // 마우스 오버 효과
-        kakao.maps.event.addListener(polygon, 'mouseover', function() {
-            polygon.setOptions({
-                fillColor: '#09f',
-                fillOpacity: 0.3,
-                strokeWeight: 3
-            });
-        });
-
-        kakao.maps.event.addListener(polygon, 'mouseout', function() {
-            polygon.setOptions({
-                fillColor: '#fff',
-                fillOpacity: 0.1,
-                strokeWeight: 2
-            });
-        });
-
-        // 클릭 이벤트
-        kakao.maps.event.addListener(polygon, 'click', function() {
-            if (currentInfowindow) {
-                currentInfowindow.close();
             }
 
-            // 속성 찾기 (대소문자 구분 없이)
-            const jibun = props.jibun || props.JIBUN || props.addr || props.ADDR || '정보없음';
-            const pnu = props.pnu || props.PNU || '';
-            
             var content = `
-                <div style="padding:10px; min-width:150px;">
-                    <strong>지번:</strong> ${jibun}<br>
-                    ${pnu ? '<strong>PNU:</strong> ' + pnu + '<br>' : ''}
+                <div class="zone-overlay">
+                    <div class="zone-title">📍 ${props.name}</div>
+                    <div class="zone-stats">${statsHtml}</div>
+                    <div class="zone-total">총 ${props.total_trees} 그루</div>
                 </div>
             `;
-            
-            currentInfowindow = new kakao.maps.InfoWindow({
-                position: path[0],
+
+            var overlay = new kakao.maps.CustomOverlay({
                 content: content,
-                removable: true
+                map: null,
+                position: position,
+                yAnchor: 1.2
             });
-            
-            currentInfowindow.open(map);
-        });
 
-        polygons.push(polygon);
-    }
+            // 클릭 시 오버레이 토글
+            kakao.maps.event.addListener(target, 'click', function() {
+                if (overlay.getMap()) overlay.setMap(null);
+                else overlay.setMap(map);
+            });
 
-    // 기존 폴리곤 삭제
-    function removePolygons() {
-        for (var i = 0; i < polygons.length; i++) {
-            polygons[i].setMap(null);
+            // 호버 효과
+            kakao.maps.event.addListener(target, 'mouseover', function() {
+                if(target.setOptions) target.setOptions({fillOpacity: 0.5, strokeOpacity: 1}); // 폴리곤
+                else target.setOptions({strokeOpacity: 1, strokeWeight: 10}); // 라인
+            });
+            kakao.maps.event.addListener(target, 'mouseout', function() {
+                if(target.setOptions) target.setOptions({fillOpacity: 0.2, strokeOpacity: 0.8});
+                else target.setOptions({strokeOpacity: 0.6, strokeWeight: 8});
+            });
         }
-        polygons = [];
-        
-        if (currentInfowindow) {
-            currentInfowindow.close();
-            currentInfowindow = null;
-        }
-    }
 
-    // ==========================================
-    // 8. 디바운스 함수
-    // ==========================================
-    function debounce(func, wait) {
-        let timeout;
-        return function executedFunction(...args) {
-            const later = () => {
-                clearTimeout(timeout);
-                func(...args);
-            };
-            clearTimeout(timeout);
-            timeout = setTimeout(later, wait);
-        };
-    }
+        // 실행
+        loadTreeData();
+        loadZoneData();
 
-    // ==========================================
-    // 9. 이벤트 등록
-    // ==========================================
-    const debouncedGetData = debounce(getData, 800);
-
-    kakao.maps.event.addListener(map, 'dragend', debouncedGetData);
-    kakao.maps.event.addListener(map, 'zoom_changed', function() {
-        document.getElementById('zoomLevel').textContent = map.getLevel();
-        debouncedGetData();
-    });
-
-    // 최초 1회 실행
-    console.log("=== 초기화 완료, 데이터 로드 시작 ===");
-    getData(); 
-
-</script>
+    </script>
 </body>
 </html>
