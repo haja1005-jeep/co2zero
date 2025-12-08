@@ -6,18 +6,33 @@
     <style>
         body { margin:0; padding:0; display:flex; height:100vh; font-family: 'Noto Sans KR', sans-serif; }
         #sidebar { width: 320px; background: #f8f9fa; padding: 20px; box-shadow: 2px 0 5px rgba(0,0,0,0.1); z-index: 10; overflow-y: auto;}
-        #map { flex: 1; }
+ 
+
+       /* [추가] 지도 컨테이너를 relative로 설정 (버튼 위치 잡기 위해) */
+        #map { flex: 1; position: relative; }
         
+        /* [추가] 지도 컨트롤 버튼 스타일 */
+        .map-controls {
+            position: absolute; top: 10px; right: 10px; z-index: 20;
+            display: flex; gap: 5px;
+        }
+        .map-btn {
+            background: white; border: 1px solid #999; padding: 8px 12px;
+            border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: bold;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .map-btn.active { background: #4263eb; color: white; border-color: #4263eb; }
+
         .form-group { margin-bottom: 15px; }
         label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px; }
         input, select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
-        
         .btn { width: 100%; padding: 10px; border: none; border-radius: 4px; color: white; cursor: pointer; font-size: 14px; margin-top: 5px; }
         .btn-primary { background: #004c80; }
         .btn-danger { background: #dc3545; margin-top: 10px; }
-        
         .info-box { background: #e9ecef; padding: 10px; border-radius: 4px; margin-bottom: 15px; font-size: 13px; }
         .highlight { color: #d63384; font-weight: bold; }
+
+	
     </style>
 </head>
 <body>
@@ -56,7 +71,12 @@
     <button class="btn btn-danger" onclick="resetMap()">🔄 초기화</button>
 </div>
 
-<div id="map"></div>
+<div id="map">
+    <div class="map-controls">
+        <button class="map-btn active" id="btnRoadmap" onclick="setMapType('roadmap')">일반지도</button>
+        <button class="map-btn" id="btnSkyview" onclick="setMapType('skyview')">위성지도</button>
+    </div>
+</div>
 
 <script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey=257fdd3647dd6abdb05eae8681106514"></script>
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
@@ -69,6 +89,22 @@
         };
 
     var map = new kakao.maps.Map(mapContainer, mapOption);
+
+    // [추가] 지도 타입 변경 함수
+    function setMapType(maptype) {
+        var roadmapBtn = document.getElementById('btnRoadmap');
+        var skyviewBtn = document.getElementById('btnSkyview'); 
+        
+        if (maptype === 'roadmap') {
+            map.setMapTypeId(kakao.maps.MapTypeId.ROADMAP);
+            roadmapBtn.classList.add('active');
+            skyviewBtn.classList.remove('active');
+        } else {
+            map.setMapTypeId(kakao.maps.MapTypeId.HYBRID);
+            roadmapBtn.classList.remove('active');
+            skyviewBtn.classList.add('active');
+        }
+    }
 
     // 그리기 관련 변수
     var drawingFlag = false; // 그리기 상태
