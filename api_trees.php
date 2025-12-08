@@ -33,7 +33,7 @@ $calc = new CarbonCalculator();
 
 // 3. 지도 영역 내 나무 조회
 // [수정] ST_X는 경도(Lng), ST_Y는 위도(Lat)입니다. 헷갈리지 않게 별칭을 정확히 수정했습니다.
-$sql = "SELECT id, species_code, dbh, height, status, 
+$sql = "SELECT id, species_code, dbh, height, status, image_path, tree_count,
         ST_X(coordinates) as lng, 
         ST_Y(coordinates) as lat 
         FROM smart_trees"; 
@@ -48,10 +48,15 @@ if ($result && $result->num_rows > 0) {
     while($row = $result->fetch_assoc()) {
         $total_trees++;
         
-        // 탄소량 계산
-        $co2 = $calc->calculate($row['species_code'], $row['dbh']);
-        $total_carbon += $co2;
-
+       
+        $count = (int)$row['tree_count']; // 수량
+        $total_trees += $count; // 전체 나무 수에 더하기
+        
+        // 탄소량 계산 (단위 탄소량 * 수량)
+        $unit_co2 = $calc->calculate($row['species_code'], $row['dbh']);
+        $total_co2 = $unit_co2 * $count; // ★ 핵심 로직 변경
+        
+        $total_carbon += $total_co2;
         // GeoJSON Feature 생성
         $features[] = [
             'type' => 'Feature',
@@ -65,8 +70,10 @@ if ($result && $result->num_rows > 0) {
                 'species' => $row['species_code'],
                 'dbh' => (float)$row['dbh'],
                 'height' => (float)$row['height'], // 높이 정보도 반환하면 좋습니다
-                'co2' => $co2,
-                'status' => $row['status']
+                 'count' => $count,        // ★ 프론트엔드로 수량 전달
+                'co2' => $total_co2,      // ★ 합산된 탄소량 전달
+                'status' => $row['status'],
+                'image_path' => $row['image_path'] // ★ [추가됨] 이미지 경로
             ]
         ];
     }

@@ -7,13 +7,13 @@ include 'db_connect.php';
 $sql = "
     SELECT 
         z.id, z.name, z.type, 
-        ST_AsGeoJSON(z.zone_geom) as geometry, -- zone_geom 컬럼 사용
+        ST_AsGeoJSON(z.zone_geom) as geometry,
         t.species_code,
-        COUNT(t.id) as tree_count,     -- 구역 내 수종별 그루 수
-        SUM(t.dbh) as total_size       -- (선택) 흉고직경 합계
+        SUM(t.tree_count) as tree_count, -- ★ COUNT() 대신 SUM() 사용!
+        SUM(t.dbh * t.tree_count) as total_size
     FROM zones z
     LEFT JOIN smart_trees t 
-        ON ST_Contains(z.zone_geom, t.coordinates) -- 공간 조인 조건 수정
+        ON ST_Contains(z.zone_geom, t.coordinates)
     GROUP BY z.id, t.species_code
     ORDER BY z.id
 ";

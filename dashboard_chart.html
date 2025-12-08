@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>스마트 탄소중립 트리맵 (Final)</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { margin: 0; padding: 0; font-family: 'Noto Sans KR', sans-serif; overflow: hidden; }
+        
+        /* 지도 전체 화면 */
+        #map { width: 100vw; height: 100vh; z-index: 1; }
+
+        /* 좌측 상단 통계 패널 */
+        .dashboard-panel {
+            position: absolute; top: 20px; left: 20px; width: 280px;
+            background: rgba(20, 30, 48, 0.95);
+            color: #fff; padding: 20px; border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5); z-index: 10;
+            backdrop-filter: blur(5px);
+        }
+        .panel-title { font-size: 18px; font-weight: bold; margin-bottom: 15px; border-bottom: 1px solid #444; padding-bottom: 10px; }
+        .stat-item { margin-bottom: 15px; display: flex; justify-content: space-between; align-items: flex-end; }
+        .stat-label { font-size: 13px; color: #ccc; }
+        .stat-value { font-size: 24px; font-weight: bold; color: #00e676; }
+        .stat-unit { font-size: 14px; color: #fff; margin-left: 2px; }
+
+        /* 차트 모달 (숨김 상태) */
+        #chartModal {
+            position: absolute; bottom: 80px; right: 20px; width: 350px;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 12px; padding: 15px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            display: none; z-index: 20;
+        }
+        .chart-header { display: flex; justify-content: space-between; margin-bottom: 10px; font-weight: bold; color: #333;}
+        .close-btn { cursor: pointer; color: #999; }
+
+        /* 차트 토글 버튼 */
+        .btn-chart {
+            position: absolute; bottom: 20px; right: 20px; z-index: 20;
+            background: #2c3e50; color: white; border: none;
+            padding: 12px 20px; border-radius: 30px; font-weight: bold;
+            cursor: pointer; box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+            display: flex; align-items: center; gap: 8px;
+            transition: transform 0.2s;
+        }
+        .btn-chart:hover { transform: scale(1.05); background: #34495e; }
+
+        /* 인포윈도우 & 오버레이 스타일 */
+        .iw-container { padding: 5px; width: 220px; font-family: 'Noto Sans KR', sans-serif; }
+        .iw-header { font-size: 14px; font-weight: bold; border-bottom: 1px solid #eee; padding-bottom: 8px; margin-bottom: 8px; color: #333; display: flex; justify-content: space-between; align-items: center; }
+        .iw-status { font-size: 11px; padding: 2px 6px; border-radius: 4px; color: #fff; }
+        .iw-row { display: flex; justify-content: space-between; font-size: 12px; color: #666; margin-bottom: 4px; }
+        .iw-carbon-box { margin-top: 10px; background-color: #e8f5e9; padding: 8px; border-radius: 6px; text-align: center; }
+        .iw-carbon-label { font-size: 11px; color: #2e7d32; margin-bottom: 2px; }
+        .iw-carbon-value { font-size: 16px; font-weight: 800; color: #00c853; }
+
+        /* 둥근 나무 사진 마커 */
+        .tree-photo-marker {
+            width: 55px; height: 55px;
+            border-radius: 50%;
+            border: 3px solid #fff;
+            background-size: cover; background-position: center;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.4);
+            cursor: pointer; transition: transform 0.2s;
+        }
+        .tree-photo-marker:hover { transform: scale(1.15); border-color: #00e676; z-index: 999; }
+
+        /* 구역 오버레이 */
+        .zone-overlay { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 15px rgba(0,0,0,0.2); min-width: 200px; position: relative; bottom: 10px; }
+        .zone-title { margin: 0 0 10px 0; color: #333; font-size: 15px; font-weight: bold; border-bottom: 2px solid #00c853; padding-bottom: 5px; }
+        .zone-stats { font-size: 12px; color: #555; }
+        .zone-stat-row { display: flex; justify-content: space-between; margin-bottom: 4px; border-bottom: 1px dashed #eee; padding-bottom: 2px; }
+        .zone-total { margin-top: 10px; padding-top: 8px; border-top: 1px solid #ddd; font-weight: bold; color: #004c80; text-align: right; }
+
+		/* 📱 모바일 최적화 */
+        @media (max-width: 768px) {
+            /* 패널 너비 조정 및 하단 이동 */
+            .dashboard-panel {
+                width: auto;
+                left: 10px; right: 10px; /* 좌우 여백 */
+                top: 10px;
+                padding: 15px;
+            }
+            
+            /* 폰트 사이즈 조절 */
+            .stat-value { font-size: 20px; }
+            .panel-title { font-size: 16px; margin-bottom: 10px; }
+            .stat-item { margin-bottom: 8px; }
+
+            /* 차트 모달 반응형 */
+            #chartModal {
+                width: auto;
+                left: 10px; right: 10px;
+                bottom: 10px;
+            }
+            
+            /* 차트 버튼 위치 조정 */
+            .btn-chart {
+                bottom: 80px; /* 모달 겹침 방지 */
+                right: 10px;
+                padding: 10px 15px;
+                font-size: 14px;
+            }
+            
+            /* 지적도 버튼 조정 */
+            div[style*="position:absolute; top:10px; right:120px;"] {
+                top: 70px !important; /* 패널 아래로 이동 */
+                right: 10px !important;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="dashboard-panel">
+        <div class="panel-title" onclick="togglePanel()" style="cursor:pointer; display:flex; justify-content:space-between;">
+          <span>🌳 스마트 탄소 관제</span>
+          <span id="panelToggleBtn">🔼</span>
+        </div>
+		<div id="panelContent">
+         <div class="stat-item">
+            <span class="stat-label">관리 중인 수목</span>
+            <div><span id="stat-tree-count" class="stat-value">0</span> <span class="stat-unit">그루</span></div>
+         </div>
+         <div class="stat-item">
+            <span class="stat-label">연간 탄소 흡수</span>
+            <div><span id="stat-carbon" class="stat-value">0</span> <span class="stat-unit">kg</span></div>
+         </div>
+         <div class="stat-item">
+            <span class="stat-label">승용차 상쇄</span>
+            <div><span id="stat-cars" class="stat-value" style="color:#29b6f6;">0</span> <span class="stat-unit">대</span></div>
+         </div>
+		</div>
+    </div>
+
+    <button class="btn-chart" onclick="toggleChart()">
+        📊 통계 분석
+    </button>
+
+    <div id="chartModal">
+        <div class="chart-header">
+            <span>수종별 분석</span>
+            <span class="close-btn" onclick="toggleChart()">✖</span>
+        </div>
+        <canvas id="speciesChart" height="200"></canvas>
+        <div style="margin-top:20px;"></div>
+        <canvas id="carbonChart" height="200"></canvas>
+    </div>
+
+    <div id="map"></div>
+
+    <script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey=257fdd3647dd6abdb05eae8681106514&libraries=clusterer,services"></script>
+
+    <script>
+    var mapContainer = document.getElementById('map');
+    var mapOption = { 
+        center: new kakao.maps.LatLng(34.8118, 126.4057), // 목포 중심
+        level: 3 
+    };
+    var map = new kakao.maps.Map(mapContainer, mapOption);
+    
+    // 줌/타입 컨트롤
+    map.addControl(new kakao.maps.MapTypeControl(), kakao.maps.ControlPosition.TOPRIGHT);
+    map.addControl(new kakao.maps.ZoomControl(), kakao.maps.ControlPosition.RIGHT);
+
+    // 지적도 버튼
+    var useDistrict = false;
+    var btnControl = document.createElement('div');
+    btnControl.style.cssText = 'position:absolute; top:10px; right:120px; z-index:20;';
+    btnControl.innerHTML = `<button onclick="toggleCadastral()" style="background:#fff; border:1px solid #ccc; padding:6px 10px; border-radius:4px; font-weight:bold; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.2);">🔲 지적도</button>`;
+    document.body.appendChild(btnControl);
+
+    function toggleCadastral() {
+        useDistrict = !useDistrict;
+        if (useDistrict) map.addOverlayMapTypeId(kakao.maps.MapTypeId.USE_DISTRICT);
+        else map.removeOverlayMapTypeId(kakao.maps.MapTypeId.USE_DISTRICT);
+    }
+
+    const speciesName = { 'pine': '소나무', 'zelkova': '느티나무', 'ginkgo': '은행나무', 'cherry': '벚나무', 'default': '기타' };
+    const speciesColor = { 'pine': '#2ecc71', 'zelkova': '#27ae60', 'ginkgo': '#f1c40f', 'cherry': '#e91e63', 'default': '#95a5a6' };
+    
+    let chartData = { species: {}, carbon: {} };
+
+    // =========================================
+    // 1. 나무 데이터 로드 (핵심 수정 부분)
+    // =========================================
+    async function loadTreeData() {
+        try {
+            const response = await fetch('api_trees.php'); 
+            const data = await response.json();
+
+            if(data.stats) {
+                document.getElementById('stat-tree-count').innerText = data.stats.total_trees;
+                document.getElementById('stat-carbon').innerText = data.stats.total_carbon;
+                document.getElementById('stat-cars').innerText = data.stats.car_equivalent;
+            }
+
+            // 차트 초기화
+            chartData.species = { 'pine':0, 'zelkova':0, 'ginkgo':0, 'cherry':0, 'default':0 };
+            chartData.carbon = { 'pine':0, 'zelkova':0, 'ginkgo':0, 'cherry':0, 'default':0 };
+
+            // 기본 마커 이미지 (사진 없을 때)
+            const treeImage = new kakao.maps.MarkerImage('https://cdn-icons-png.flaticon.com/512/489/489969.png', new kakao.maps.Size(35, 35), { offset: new kakao.maps.Point(17, 35) });
+
+            // 인포윈도우는 하나만 만들어서 재사용 (성능 최적화)
+            var commonInfowindow = new kakao.maps.InfoWindow({ zIndex: 100, removable: true });
+
+            data.features.forEach(feature => {
+                var props = feature.properties;
+                // [중요] 좌표가 유효한지 체크
+                if (!feature.geometry.coordinates || feature.geometry.coordinates.length < 2) return;
+                
+                var lat = feature.geometry.coordinates[1];
+                var lng = feature.geometry.coordinates[0];
+                var markerPosition = new kakao.maps.LatLng(lat, lng);
+
+                // 통계 집계
+                let sp = props.species;
+                if(!chartData.species.hasOwnProperty(sp)) sp = 'default';
+                chartData.species[sp] += parseInt(props.count);
+                chartData.carbon[sp] += parseFloat(props.co2);
+
+                // 팝업 내용 생성
+                var statusColor = props.status === 'healthy' ? '#00c853' : '#ff3d00';
+                var statusText = props.status === 'healthy' ? '양호' : '관리필요';
+                var spName = speciesName[props.species] || props.species;
+                var countLabel = props.count > 1 ? ` <span style="font-size:12px; color:#0000ff; font-weight:bold;">(x${props.count})</span>` : '';
+                
+                var photoHtml = props.image_path ? 
+                    `<div style="margin-bottom:8px;"><img src="${props.image_path}" style="width:100%; height:120px; object-fit:cover; border-radius:6px;"></div>` : '';
+
+                var iwContent = `
+                    <div class="iw-container">
+                        ${photoHtml}
+                        <div class="iw-header">
+                            <span>${spName}${countLabel}</span> <span class="iw-status" style="background-color:${statusColor}">${statusText}</span>
+                        </div>
+                        <div class="iw-row"><span>수량</span><span style="font-weight:bold;">${props.count} 그루</span></div>
+						<div class="iw-row"><span>수고</span><span>${props.height || '-'} m</span></div>
+                        <div class="iw-row"><span>흉고직경</span><span>${props.dbh} cm</span></div>
+
+                        <div class="iw-carbon-box">
+                            <div class="iw-carbon-label">🌱 총 연간 이산화탄소 흡수량</div>
+                            <div class="iw-carbon-value">${Number(props.co2).toLocaleString()} kg</div>
+                        </div>
+                    </div>`;
+
+                // ★ [분기] 사진 유무에 따라 마커 생성 방식 다름
+                if (props.image_path) {
+                    // [사진 마커] CustomOverlay 사용
+                    var content = document.createElement('div');
+                    content.className = 'tree-photo-marker';
+                    content.style.backgroundImage = `url('${props.image_path}')`;
+                    content.title = spName; // 마우스 오버 시 이름
+
+                    var customOverlay = new kakao.maps.CustomOverlay({
+                        position: markerPosition,
+                        content: content,
+                        map: map,
+                        yAnchor: 0.5 // 중앙 기준
+                    });
+
+                    // ★ [버그 수정] 오버레이 클릭 시 인포윈도우 위치를 강제로 지정
+                    content.addEventListener('click', function() {
+                        commonInfowindow.setContent(iwContent);
+                        commonInfowindow.setPosition(markerPosition); // 위치 직접 지정 (필수!)
+                        commonInfowindow.open(map); // 마커 객체 없이 맵에 직접 오픈
+                    });
+
+                } else {
+                    // [기본 마커] Marker 사용
+                    var marker = new kakao.maps.Marker({
+                        position: markerPosition,
+                        map: map,
+                        image: treeImage,
+                        title: spName
+                    });
+
+                    kakao.maps.event.addListener(marker, 'click', function() {
+                        commonInfowindow.setContent(iwContent);
+                        commonInfowindow.open(map, marker); // 기본 마커는 앵커링 가능
+                    });
+                }
+            });
+
+            updateCharts(); 
+
+        } catch (error) { console.error('Data Load Error:', error); }
+    }
+
+    // =========================================
+    // 2. 구역 데이터 로드 (변경 없음, 안정화)
+    // =========================================
+    async function loadZoneData() {
+        try {
+            const response = await fetch('api_zones.php');
+            const zones = await response.json();
+            
+            // 인포윈도우/오버레이 관리용 변수
+            var activeOverlay = null;
+
+            zones.forEach(zone => {
+                var geoType = zone.geometry.type;
+                var coords = zone.geometry.coordinates;
+                var props = zone.properties;
+                var overlayPos;
+
+                // 도형 그리기
+                var overlayObj; // 폴리곤이나 라인 객체
+
+                if (geoType === 'Polygon') {
+                    var path = coords[0].map(c => new kakao.maps.LatLng(c[1], c[0]));
+                    overlayObj = new kakao.maps.Polygon({
+                        map: map, path: path, strokeWeight: 2, strokeColor: '#004c80',
+                        fillColor: '#00c853', fillOpacity: 0.2
+                    });
+                    overlayPos = path[0];
+                } else if (geoType === 'LineString') {
+                    var path = coords.map(c => new kakao.maps.LatLng(c[1], c[0]));
+                    overlayObj = new kakao.maps.Polyline({
+                        map: map, path: path, strokeWeight: 8, strokeColor: '#8e44ad', strokeOpacity: 0.6
+                    });
+                    overlayPos = path[Math.floor(path.length/2)];
+                }
+
+                if(!overlayObj) return;
+
+                // 통계 오버레이 내용
+                let statsHtml = '';
+                let stats = props.stats || {};
+                if (Object.keys(stats).length === 0) statsHtml = '<div style="text-align:center; color:#999;">데이터 없음</div>';
+                else {
+                    for (let [code, count] of Object.entries(stats)) {
+                        statsHtml += `<div class="zone-stat-row"><span>${speciesName[code]||code}</span><b>${count}주</b></div>`;
+                    }
+                }
+                var content = `<div class="zone-overlay"><div class="zone-title">📍 ${props.name}</div><div class="zone-stats">${statsHtml}</div><div class="zone-total">총 ${props.total_trees} 그루</div></div>`;
+                
+                var customOverlay = new kakao.maps.CustomOverlay({
+                    content: content, position: overlayPos, yAnchor: 1.2
+                });
+
+                // 이벤트 연결
+                kakao.maps.event.addListener(overlayObj, 'click', () => {
+                    if(customOverlay.getMap()) customOverlay.setMap(null); 
+                    else customOverlay.setMap(map);
+                });
+                kakao.maps.event.addListener(overlayObj, 'mouseover', () => { 
+                    if(overlayObj.setOptions) overlayObj.setOptions({fillOpacity: 0.5, strokeOpacity: 1}); 
+                });
+                kakao.maps.event.addListener(overlayObj, 'mouseout', () => { 
+                    if(overlayObj.setOptions) overlayObj.setOptions({fillOpacity: 0.2, strokeOpacity: 0.6}); 
+                });
+            });
+        } catch (error) { console.error('Zone Error:', error); }
+    }
+
+    // ===================================
+    // 3. 차트 관련 로직
+    // ===================================
+    function toggleChart() {
+        var modal = document.getElementById('chartModal');
+        modal.style.display = (modal.style.display === 'block') ? 'none' : 'block';
+    }
+
+    function updateCharts() {
+        const ctx1 = document.getElementById('speciesChart').getContext('2d');
+        new Chart(ctx1, {
+            type: 'doughnut',
+            data: {
+                labels: Object.keys(chartData.species).map(k => speciesName[k]),
+                datasets: [{
+                    data: Object.values(chartData.species),
+                    backgroundColor: Object.keys(chartData.species).map(k => speciesColor[k])
+                }]
+            },
+            options: { responsive: true, plugins: { legend: { position: 'right' }, title: { display: true, text: '수종별 식재 현황' } } }
+        });
+
+        const ctx2 = document.getElementById('carbonChart').getContext('2d');
+        new Chart(ctx2, {
+            type: 'bar',
+            data: {
+                labels: Object.keys(chartData.carbon).map(k => speciesName[k]),
+                datasets: [{
+                    label: '탄소 흡수량 (kg)',
+                    data: Object.values(chartData.carbon),
+                    backgroundColor: Object.keys(chartData.carbon).map(k => speciesColor[k])
+                }]
+            },
+            options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+        });
+    }
+
+
+function togglePanel() {
+    var content = document.getElementById('panelContent');
+    var btn = document.getElementById('panelToggleBtn');
+    if (content.style.display === 'none') {
+        content.style.display = 'block';
+        btn.innerText = '🔼';
+    } else {
+        content.style.display = 'none';
+        btn.innerText = '🔽';
+    }
+}
+    // 초기화 실행
+    loadTreeData();
+    loadZoneData();
+    
+    // [중요] 윈도우 리사이즈 시 지도 깨짐 방지
+    window.addEventListener('resize', function() {
+        map.relayout();
+    });
+
+</script>
+</body>
+</html>
