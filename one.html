@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>카카오맵 + 브이월드 지적도 연동 - 특정 지번</title>
+    <style>
+        body { margin: 0; padding: 0; }
+        #map { width: 100%; height: 100vh; }
+        .loading {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            z-index: 999; background: rgba(0,0,0,0.7); color: white;
+            padding: 10px 20px; border-radius: 5px; display: none;
+        }
+        .error-msg {
+            position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+            z-index: 1000; background: #ff4444; color: white;
+            padding: 10px 20px; border-radius: 5px; display: none;
+            max-width: 80%;
+        }
+        .info-msg {
+            position: absolute; top: 10px; right: 10px;
+            z-index: 1000; background: rgba(0,0,0,0.7); color: white;
+            padding: 10px; border-radius: 5px; font-size: 12px;
+        }
+        .search-box {
+            position: absolute; top: 10px; left: 10px;
+            z-index: 1000; background: white;
+            padding: 10px; border-radius: 5px; box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
+        .search-box input {
+            padding: 8px;
+            width: 300px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            font-size: 14px;
+        }
+        .search-box button {
+            padding: 8px 15px;
+            background: #004c80;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            margin-left: 5px;
+        }
+        .search-box button:hover {
+            background: #003d66;
+        }
+        /* 커스텀 오버레이 스타일 */
+        .custom-overlay {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.85);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 5px;
+            font-size: 13px;
+            white-space: nowrap;
+            pointer-events: none;
+            transform: translate(-50%, -100%);
+            margin-top: -10px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            z-index: 1001;
+        }
+        .custom-overlay::after {
+            content: '';
+            position: absolute;
+            bottom: -5px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 0;
+            height: 0;
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            border-top: 5px solid rgba(0, 0, 0, 0.85);
+        }
+    </style>
+</head>
+<body>
+
+<div class="search-box">
+    <input type="text" id="searchJibun" placeholder="예: 전라남도 목포시 용당동 183-42" value="전라남도 목포시 용당동 183-42">
+    <button onclick="searchSpecificJibun()">검색</button>
+    <button onclick="showAllJibun()">전체보기</button>
+</div>
+
+<div id="loading" class="loading">데이터 불러오는 중...</div>
+<div id="error" class="error-msg"></div>
+<div class="info-msg">
+    줌 레벨: <span id="zoomLevel">1</span><br>
+    표시된 필지: <span id="polygonCount">0</span>개
+</div>
+<div id="map"></div>
+
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey=257fdd3647dd6abdb05eae8681106514&libraries=clusterer,services"></script>
+  
+<script>
+    // ==========================================
+    // 1. 설정값
+    // ==========================================
+    const VWORLD_KEY = 'ACEB012E-C384-3176-BC45-4D4CAE466B1E';
+    const MAX_ZOOM_LEVEL = 5;
+    let isLoading = false;
+    let filterJibun = null; // 필터링할 지번
+    
+    // ==========================================
+    // 2. 지도 초기화
+    // ==========================================
+    var mapContainer = document.getElementById('map');
+    var mapOption = { 
+        center: new kakao.maps.LatLng(34.8118, 126.4057), 
+        level: 1
+    };
+    var map = new kakao.maps.Map(mapContainer, mapOption);
+
+    var polygons = [];
+    var currentInfowindow = null;
+    var targetMarker = null; // 검색한 지번 마커
+    var hoverOverlay = null; // 마우스 오버 오버레이
+
+    // 줌 레벨 표시
+    document.getElementById('zoomLevel').textContent = map.getLevel();
+
+    // ==========================================
+    // 3. 에러 표시 함수
+    // ==========================================
+    function showError(message) {
+        const errorDiv = $('#error');
+        errorDiv.html(message).fadeIn();
+        setTimeout(() => errorDiv.fadeOut(), 5000);
+    }
+
+    // ==========================================
+    // 4. 특정 지번 검색
+    // ==========================================
+    function searchSpecificJibun() {
+        const input = document.getElementById('searchJibun').value.trim();
+        if (!input) {
+            showError("지번을 입력해주세요.");
+            return;
+        }
+
+        // 주소에서 지번만 추출 (예: "183-42")
+        const parts = input.split(' ');
+        filterJibun = parts[parts.length - 1]; // 마지막 부분이 지번
+        
+        console.log("검색할 지번:", filterJibun);
+        
+        // 해당 주소로 지도 이동
+        const geocoder = new kakao.maps.services.Geocoder();
+        geocoder.addressSearch(input, function(result, status) {
+            if (status === kakao.maps.services.Status.OK) {
+                const coords = new kakao.maps.LatLng(result[0].y, result[0].x);
+                map.setCenter(coords);
+                map.setLevel(1); // 가장 확대
+                
+                // 마커 표시
+                if (targetMarker) {
+                    targetMarker.setMap(null);
+                }
+                targetMarker = new kakao.maps.Marker({
+                    map: map,
+                    position: coords
+                });
+                
+                // 데이터 로드
+                getData();
+            } else {
+                showError("주소를 찾을 수 없습니다.");
+            }
+        });
+    }
+
+    // ==========================================
+    // 5. 전체 보기
+    // ==========================================
+    function showAllJibun() {
+        filterJibun = null;
+        if (targetMarker) {
+            targetMarker.setMap(null);
+            targetMarker = null;
+        }
+        getData();
+    }
+
+    // ==========================================
+    // 6. 브이월드 데이터 요청 함수
+    // ==========================================
+    function getData() {
+        const currentLevel = map.getLevel();
+        document.getElementById('zoomLevel').textContent = currentLevel;
+
+        if (currentLevel > MAX_ZOOM_LEVEL) {
+            console.log("지도를 더 확대해주세요. (현재 레벨: " + currentLevel + ")");
+            removePolygons();
+            return;
+        }
+
+        if (isLoading) {
+            console.log("이미 데이터를 불러오는 중입니다.");
+            return;
+        }
+
+        isLoading = true;
+        $('#loading').show();
+
+        var bounds = map.getBounds();
+        var sw = bounds.getSouthWest();
+        var ne = bounds.getNorthEast();
+        var bbox = `${sw.getLng()},${sw.getLat()},${ne.getLng()},${ne.getLat()}`;
+
+        console.log("=== 요청 정보 ===");
+        console.log("BBOX:", bbox);
+        console.log("필터 지번:", filterJibun || "전체");
+
+        const params = {
+            service: 'WFS',
+            version: '2.0.0',
+            request: 'GetFeature',
+            typeName: 'lp_pa_cbnd_bubun',
+            srsName: 'EPSG:4326',
+            bbox: bbox,
+            output: 'text/javascript',
+            format_options: 'callback:parseData',
+            exceptions: 'text/javascript',
+            key: VWORLD_KEY
+        };
+
+        const url = "https://api.vworld.kr/req/wfs?" + $.param(params);
+
+        const script = document.createElement('script');
+        script.src = url;
+        script.id = 'vworld-script';
+        
+        script.onerror = function() {
+            console.error("=== 스크립트 로드 실패 ===");
+            showError("브이월드 API 연결 실패");
+            $('#loading').hide();
+            isLoading = false;
+            if (document.getElementById('vworld-script')) {
+                document.head.removeChild(script);
+            }
+        };
+
+        const timeout = setTimeout(() => {
+            console.error("=== 요청 타임아웃 ===");
+            showError("요청 시간 초과");
+            $('#loading').hide();
+            isLoading = false;
+            if (document.getElementById('vworld-script')) {
+                document.head.removeChild(script);
+            }
+        }, 15000);
+
+        const oldScript = document.getElementById('vworld-script');
+        if (oldScript) {
+            document.head.removeChild(oldScript);
+        }
+
+        document.head.appendChild(script);
+    }
+
+    // ==========================================
+    // 7. 전역 콜백 함수
+    // ==========================================
+    window.parseData = function(data) {
+        console.log("=== parseData 호출됨 ===");
+        
+        clearTimeout(window.vworldTimeout);
+        $('#loading').hide();
+        isLoading = false;
+
+        const script = document.getElementById('vworld-script');
+        if (script) {
+            document.head.removeChild(script);
+        }
+
+        processData(data);
+    };
+
+    // ==========================================
+    // 8. 데이터 처리 및 그리기
+    // ==========================================
+    function processData(data) {
+        removePolygons();
+
+        if (data.type === 'error' || data.error) {
+            console.error("API 에러:", data);
+            showError("API 오류: " + (data.message || "알 수 없는 오류"));
+            return;
+        }
+
+        let features = data.features;
+        
+        if (!features) {
+            if (data.response && data.response.result) {
+                features = data.response.result.featureCollection.features;
+            } else if (data.result) {
+                features = data.result.featureCollection.features;
+            } else if (data.featureCollection) {
+                features = data.featureCollection.features;
+            }
+        }
+
+        if (!features || features.length === 0) {
+            console.log("해당 영역에 데이터가 없습니다.");
+            showError("해당 영역에 지적도 데이터가 없습니다.");
+            document.getElementById('polygonCount').textContent = '0';
+            return;
+        }
+
+        console.log(`${features.length}개의 필지 데이터 처리 시작`);
+
+        let successCount = 0;
+        features.forEach(function(feature, index) {
+            try {
+                var geometry = feature.geometry;
+                var props = feature.properties;
+                
+                if (!geometry || !geometry.coordinates) {
+                    return;
+                }
+
+                // 지번 필터링
+                if (filterJibun) {
+                    const jibun = props.jibun || props.JIBUN || props.addr || props.ADDR || '';
+                    // 지번이 일치하지 않으면 스킵
+                    if (!jibun.includes(filterJibun)) {
+                        return;
+                    }
+                    console.log("매칭된 지번:", jibun);
+                }
+
+                if (geometry.type === 'Polygon') {
+                    drawPolygon(geometry.coordinates[0], props, filterJibun !== null);
+                    successCount++;
+                } else if (geometry.type === 'MultiPolygon') {
+                    geometry.coordinates.forEach(function(coords) {
+                        drawPolygon(coords[0], props, filterJibun !== null);
+                        successCount++;
+                    });
+                }
+            } catch (e) {
+                console.error(`feature ${index} 처리 오류:`, e);
+            }
+        });
+
+        console.log(`총 ${successCount}개의 폴리곤 그리기 완료`);
+        document.getElementById('polygonCount').textContent = successCount;
+
+        // 특정 지번 검색 시 결과가 없으면 알림
+        if (filterJibun && successCount === 0) {
+            showError(`'${filterJibun}' 지번을 찾을 수 없습니다.<br>지도를 이동하거나 확대해주세요.`);
+        }
+    }
+
+    // ==========================================
+    // 9. 폴리곤 그리기 함수
+    // ==========================================
+    function drawPolygon(rawPath, props, isHighlight) {
+        if (!rawPath || rawPath.length < 3) {
+            return;
+        }
+
+        var path = [];
+
+        for (var i = 0; i < rawPath.length; i++) {
+            if (rawPath[i] && rawPath[i].length >= 2) {
+                path.push(new kakao.maps.LatLng(rawPath[i][1], rawPath[i][0]));
+            }
+        }
+
+        if (path.length < 3) {
+            return;
+        }
+
+        // 검색된 지번은 강조 표시
+        var polygon = new kakao.maps.Polygon({
+            map: map,
+            path: path,
+            strokeWeight: isHighlight ? 4 : 2,
+            strokeColor: isHighlight ? '#ff0000' : '#004c80',
+            strokeOpacity: 0.8,
+            fillColor: isHighlight ? '#ff0000' : '#fff',
+            fillOpacity: isHighlight ? 0.3 : 0.1
+        });
+
+        // 지번과 면적 정보 추출
+        const jibun = props.jibun || props.JIBUN || props.addr || props.ADDR || '정보없음';
+        const pnu = props.pnu || props.PNU || '';
+        
+        // 면적 정보 (여러 필드명 시도)
+        let area = props.area || props.AREA || props.jimok_area || props.JIMOK_AREA || 
+                   props.parea || props.PAREA || props.geom_area || props.GEOM_AREA || '';
+        
+        // 면적이 숫자인 경우 포맷팅
+        if (area && !isNaN(area)) {
+            area = parseFloat(area).toLocaleString() + '㎡';
+        } else if (!area) {
+            area = '정보없음';
+        }
+
+        // 마우스 오버 이벤트 - 툴팁 표시
+        kakao.maps.event.addListener(polygon, 'mouseover', function(mouseEvent) {
+            polygon.setOptions({
+                fillColor: '#09f',
+                fillOpacity: 0.5,
+                strokeWeight: isHighlight ? 5 : 3
+            });
+
+            // 기존 오버레이 제거
+            if (hoverOverlay) {
+                hoverOverlay.setMap(null);
+            }
+
+            // 마우스 위치에 커스텀 오버레이 생성
+            const content = `
+                <div class="custom-overlay">
+                    <strong>지번:</strong> ${jibun}<br>
+                    <strong>면적:</strong> ${area}
+                </div>
+            `;
+
+            hoverOverlay = new kakao.maps.CustomOverlay({
+                position: mouseEvent.latLng,
+                content: content,
+                yAnchor: 1
+            });
+
+            hoverOverlay.setMap(map);
+        });
+
+        // 마우스 아웃 이벤트 - 툴팁 제거
+        kakao.maps.event.addListener(polygon, 'mouseout', function() {
+            polygon.setOptions({
+                fillColor: isHighlight ? '#ff0000' : '#fff',
+                fillOpacity: isHighlight ? 0.3 : 0.1,
+                strokeWeight: isHighlight ? 4 : 2
+            });
+
+            // 오버레이 제거
+            if (hoverOverlay) {
+                hoverOverlay.setMap(null);
+                hoverOverlay = null;
+            }
+        });
+
+        // 클릭 이벤트 - 상세 정보창
+        kakao.maps.event.addListener(polygon, 'click', function() {
+            // 오버레이 제거
+            if (hoverOverlay) {
+                hoverOverlay.setMap(null);
+                hoverOverlay = null;
+            }
+
+            if (currentInfowindow) {
+                currentInfowindow.close();
+            }
+
+            var content = `
+                <div style="padding:10px; min-width:180px;">
+                    <strong style="color: ${isHighlight ? '#ff0000' : '#004c80'};">지번:</strong> ${jibun}<br>
+                    <strong>면적:</strong> ${area}<br>
+                    ${pnu ? '<strong>PNU:</strong> ' + pnu + '<br>' : ''}
+                    ${isHighlight ? '<span style="color: #ff0000;">★ 검색된 지번</span>' : ''}
+                </div>
+            `;
+            
+            currentInfowindow = new kakao.maps.InfoWindow({
+                position: path[0],
+                content: content,
+                removable: true
+            });
+            
+            currentInfowindow.open(map);
+        });
+
+        // 검색된 지번이면 자동으로 InfoWindow 열기
+        if (isHighlight && polygons.length === 0) {
+            var content = `
+                <div style="padding:10px; min-width:180px;">
+                    <strong style="color: #ff0000;">지번:</strong> ${jibun}<br>
+                    <strong>면적:</strong> ${area}<br>
+                    ${pnu ? '<strong>PNU:</strong> ' + pnu + '<br>' : ''}
+                    <span style="color: #ff0000;">★ 검색된 지번</span>
+                </div>
+            `;
+            
+            currentInfowindow = new kakao.maps.InfoWindow({
+                position: path[0],
+                content: content,
+                removable: true
+            });
+            
+            currentInfowindow.open(map);
+        }
+
+        polygons.push(polygon);
+    }
+
+    // 기존 폴리곤 삭제
+    function removePolygons() {
+        for (var i = 0; i < polygons.length; i++) {
+            polygons[i].setMap(null);
+        }
+        polygons = [];
+        
+        if (currentInfowindow) {
+            currentInfowindow.close();
+            currentInfowindow = null;
+        }
+
+        if (hoverOverlay) {
+            hoverOverlay.setMap(null);
+            hoverOverlay = null;
+        }
+    }
+
+    // ==========================================
+    // 10. 디바운스 함수
+    // ==========================================
+    function debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+            const later = () => {
+                clearTimeout(timeout);
+                func(...args);
+            };
+            clearTimeout(timeout);
+            timeout = setTimeout(later, wait);
+        };
+    }
+
+    // ==========================================
+    // 11. 이벤트 등록
+    // ==========================================
+    const debouncedGetData = debounce(getData, 800);
+
+    kakao.maps.event.addListener(map, 'dragend', debouncedGetData);
+    kakao.maps.event.addListener(map, 'zoom_changed', function() {
+        document.getElementById('zoomLevel').textContent = map.getLevel();
+        debouncedGetData();
+    });
+
+    // Enter 키로 검색
+    document.getElementById('searchJibun').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            searchSpecificJibun();
+        }
+    });
+
+    // 최초 1회 실행
+    console.log("=== 초기화 완료 ===");
+    getData(); 
+
+</script>
+</body>
+</html>

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>스마트 탄소중립 트리맵</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; padding: 0; font-family: 'Noto Sans KR', sans-serif; overflow: hidden; }
+        
+        /* 1. 지도 전체 화면 */
+        #map { width: 100vw; height: 100vh; z-index: 1; }
+
+        /* 2. 대시보드 오버레이 (좌측 상단) */
+        .dashboard-panel {
+            position: absolute; top: 20px; left: 20px; width: 300px;
+            background: rgba(20, 30, 48, 0.9); /* 다크 모드 반투명 */
+            color: #fff; padding: 20px; border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5); z-index: 999;
+            backdrop-filter: blur(5px);
+        }
+        .panel-title { font-size: 18px; font-weight: bold; margin-bottom: 15px; border-bottom: 1px solid #444; padding-bottom: 10px; }
+        .stat-item { margin-bottom: 15px; }
+        .stat-label { font-size: 12px; color: #aaa; }
+        .stat-value { font-size: 24px; font-weight: bold; color: #00e676; } /* 형광 초록 */
+        .stat-unit { font-size: 14px; color: #fff; }
+
+        /* 3. 상태 표시 마커 스타일 */
+        .status-badge { padding: 2px 6px; border-radius: 4px; font-size: 11px; color: white; }
+        .bg-healthy { background-color: #00c853; }
+        .bg-warning { background-color: #ffab00; }
+    </style>
+</head>
+<body>
+
+    <div class="dashboard-panel">
+        <div class="panel-title">🌳 스마트 탄소 관제</div>
+        
+        <div class="stat-item">
+            <div class="stat-label">관리 중인 수목</div>
+            <span id="stat-tree-count" class="stat-value">0</span> <span class="stat-unit">그루</span>
+        </div>
+
+        <div class="stat-item">
+            <div class="stat-label">실시간 탄소 흡수량</div>
+            <span id="stat-carbon" class="stat-value">0</span> <span class="stat-unit">kg/년</span>
+        </div>
+
+        <div class="stat-item">
+            <div class="stat-label">승용차 상쇄 효과</div>
+            <span id="stat-cars" class="stat-value" style="color:#29b6f6;">0</span> <span class="stat-unit">대 분량</span>
+        </div>
+        
+        <div style="font-size:11px; color:#666; margin-top:10px;">
+            * 국립산림과학원 표준 산식 적용
+        </div>
+    </div>
+
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // 1. 지도 생성 (서울 시청 중심)
+        const map = L.map('map').setView([37.5665, 126.9780], 17);
+
+        // 2. 지도 타일 레이어 (오픈스트리트맵 - 무료)
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+            subdomains: 'abcd',
+            maxZoom: 20
+        }).addTo(map);
+
+        // 3. PHP API 데이터 가져오기
+        async function loadTreeData() {
+            try {
+                const response = await fetch('api_trees.php'); // PHP 파일 호출
+                const data = await response.json();
+
+                // 3-1. 대시보드 숫자 업데이트 (애니메이션 효과 가능)
+                document.getElementById('stat-tree-count').innerText = data.stats.total_trees;
+                document.getElementById('stat-carbon').innerText = data.stats.total_carbon;
+                document.getElementById('stat-cars').innerText = data.stats.car_equivalent;
+
+                // 3-2. 지도에 마커 찍기
+                L.geoJSON(data, {
+                    pointToLayer: function (feature, latlng) {
+                        // 나무 상태에 따라 색상 변경
+                        let color = feature.properties.status === 'healthy' ? '#00e676' : '#ff3d00';
+                        return L.circleMarker(latlng, {
+                            radius: 8,
+                            fillColor: color,
+                            color: "#fff",
+                            weight: 1,
+                            opacity: 1,
+                            fillOpacity: 0.8
+                        });
+                    },
+                    onEachFeature: function (feature, layer) {
+                        // 클릭 시 팝업 정보
+                        layer.bindPopup(`
+                            <b>🌲 수종: ${feature.properties.species}</b><br>
+                            직경: ${feature.properties.dbh}cm<br>
+                            <b>CO₂ 흡수: ${feature.properties.co2}kg</b>
+                        `);
+                    }
+                }).addTo(map);
+
+            } catch (error) {
+                console.error('데이터 로딩 실패:', error);
+                alert('서버에서 데이터를 가져오지 못했습니다.');
+            }
+        }
+
+        // 실행
+        loadTreeData();
+    </script>
+</body>
+</html>

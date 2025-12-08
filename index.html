@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>카카오맵 + 브이월드 지적도 연동</title>
+    <style>
+        body { margin: 0; padding: 0; }
+        #map { width: 100%; height: 100vh; }
+        .loading {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            z-index: 999; background: rgba(0,0,0,0.7); color: white;
+            padding: 10px 20px; border-radius: 5px; display: none;
+        }
+        .error-msg {
+            position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+            z-index: 1000; background: #ff4444; color: white;
+            padding: 10px 20px; border-radius: 5px; display: none;
+            max-width: 80%;
+        }
+        .info-msg {
+            position: absolute; top: 10px; right: 10px;
+            z-index: 1000; background: rgba(0,0,0,0.7); color: white;
+            padding: 10px; border-radius: 5px; font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="loading" class="loading">데이터 불러오는 중...</div>
+<div id="error" class="error-msg"></div>
+<div class="info-msg">
+    줌 레벨: <span id="zoomLevel">1</span><br>
+    (지적도는 1~5 레벨에서 표시)
+</div>
+<div id="map"></div>
+
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey=257fdd3647dd6abdb05eae8681106514&libraries=clusterer,services"></script>
+  
+<script>
+    // ==========================================
+    // 1. 설정값
+    // ==========================================
+    const VWORLD_KEY = 'ACEB012E-C384-3176-BC45-4D4CAE466B1E';
+    const MAX_ZOOM_LEVEL = 5;
+    let isLoading = false;
+    
+    // ==========================================
+    // 2. 지도 초기화
+    // ==========================================
+    var mapContainer = document.getElementById('map');
+    var mapOption = { 
+        center: new kakao.maps.LatLng(34.8118, 126.4057), 
+        level: 1
+    };
+    var map = new kakao.maps.Map(mapContainer, mapOption);
+
+    var polygons = [];
+    var currentInfowindow = null;
+
+    // 줌 레벨 표시
+    document.getElementById('zoomLevel').textContent = map.getLevel();
+
+    // ==========================================
+    // 3. 에러 표시 함수
+    // ==========================================
+    function showError(message) {
+        const errorDiv = $('#error');
+        errorDiv.html(message).fadeIn();
+        setTimeout(() => errorDiv.fadeOut(), 5000);
+    }
+
+    // ==========================================
+    // 4. 브이월드 데이터 요청 함수
+    // ==========================================
+    function getData() {
+        const currentLevel = map.getLevel();
+        document.getElementById('zoomLevel').textContent = currentLevel;
+
+        if (currentLevel > MAX_ZOOM_LEVEL) {
+            console.log("지도를 더 확대해주세요. (현재 레벨: " + currentLevel + ")");
+            removePolygons();
+            return;
+        }
+
+        if (isLoading) {
+            console.log("이미 데이터를 불러오는 중입니다.");
+            return;
+        }
+
+        isLoading = true;
+        $('#loading').show();
+
+        var bounds = map.getBounds();
+        var sw = bounds.getSouthWest();
+        var ne = bounds.getNorthEast();
+        var bbox = `${sw.getLng()},${sw.getLat()},${ne.getLng()},${ne.getLat()}`;
+
+        console.log("=== 요청 정보 ===");
+        console.log("BBOX:", bbox);
+        console.log("현재 줌 레벨:", currentLevel);
+
+        // 브이월드 WFS 방식 (format_options 사용)
+        const params = {
+            service: 'WFS',
+            version: '2.0.0',
+            request: 'GetFeature',
+            typeName: 'lp_pa_cbnd_bubun',
+            srsName: 'EPSG:4326',
+            bbox: bbox,
+            output: 'text/javascript',
+            format_options: 'callback:parseData',
+            exceptions: 'text/javascript',
+            key: VWORLD_KEY
+        };
+
+        const url = "https://api.vworld.kr/req/wfs?" + $.param(params);
+        console.log("요청 URL:", url);
+
+        // JSONP script 태그 방식
+        const script = document.createElement('script');
+        script.src = url;
+        script.id = 'vworld-script';
+        
+        script.onerror = function() {
+            console.error("=== 스크립트 로드 실패 ===");
+            showError("브이월드 API 연결 실패<br>API 키를 확인해주세요.");
+            $('#loading').hide();
+            isLoading = false;
+            if (document.getElementById('vworld-script')) {
+                document.head.removeChild(script);
+            }
+        };
+
+        script.onload = function() {
+            console.log("스크립트 로드 성공");
+        };
+
+        // 타임아웃 (15초)
+        const timeout = setTimeout(() => {
+            console.error("=== 요청 타임아웃 ===");
+            showError("요청 시간 초과");
+            $('#loading').hide();
+            isLoading = false;
+            if (document.getElementById('vworld-script')) {
+                document.head.removeChild(script);
+            }
+        }, 15000);
+
+        // 기존 스크립트 제거
+        const oldScript = document.getElementById('vworld-script');
+        if (oldScript) {
+            document.head.removeChild(oldScript);
+        }
+
+        document.head.appendChild(script);
+    }
+
+    // ==========================================
+    // 5. 전역 콜백 함수 (브이월드가 호출)
+    // ==========================================
+    window.parseData = function(data) {
+        console.log("=== parseData 호출됨 ===");
+        console.log("받은 데이터:", data);
+        
+        clearTimeout(window.vworldTimeout);
+        $('#loading').hide();
+        isLoading = false;
+
+        // 스크립트 태그 제거
+        const script = document.getElementById('vworld-script');
+        if (script) {
+            document.head.removeChild(script);
+        }
+
+        processData(data);
+    };
+
+    // ==========================================
+    // 6. 데이터 처리 및 그리기
+    // ==========================================
+    function processData(data) {
+        removePolygons();
+
+        // 에러 체크
+        if (data.type === 'error' || data.error) {
+            console.error("API 에러:", data);
+            showError("API 오류: " + (data.message || "알 수 없는 오류"));
+            return;
+        }
+
+        // features 찾기
+        let features = data.features;
+        
+        if (!features) {
+            // 다양한 응답 구조 처리
+            if (data.response && data.response.result) {
+                features = data.response.result.featureCollection.features;
+            } else if (data.result) {
+                features = data.result.featureCollection.features;
+            } else if (data.featureCollection) {
+                features = data.featureCollection.features;
+            }
+        }
+
+        if (!features || features.length === 0) {
+            console.log("해당 영역에 데이터가 없습니다.");
+            console.log("전체 데이터 구조:", data);
+            showError("해당 영역에 지적도 데이터가 없습니다.");
+            return;
+        }
+
+        console.log(`${features.length}개의 필지 데이터 처리 시작`);
+
+        let successCount = 0;
+        features.forEach(function(feature, index) {
+            try {
+                var geometry = feature.geometry;
+                var props = feature.properties;
+                
+                if (!geometry || !geometry.coordinates) {
+                    return;
+                }
+
+                if (geometry.type === 'Polygon') {
+                    drawPolygon(geometry.coordinates[0], props);
+                    successCount++;
+                } else if (geometry.type === 'MultiPolygon') {
+                    geometry.coordinates.forEach(function(coords) {
+                        drawPolygon(coords[0], props);
+                        successCount++;
+                    });
+                }
+            } catch (e) {
+                console.error(`feature ${index} 처리 오류:`, e);
+            }
+        });
+
+        console.log(`총 ${successCount}개의 폴리곤 그리기 완료`);
+    }
+
+    // ==========================================
+    // 7. 폴리곤 그리기 함수
+    // ==========================================
+    function drawPolygon(rawPath, props) {
+        if (!rawPath || rawPath.length < 3) {
+            return;
+        }
+
+        var path = [];
+
+        for (var i = 0; i < rawPath.length; i++) {
+            if (rawPath[i] && rawPath[i].length >= 2) {
+                path.push(new kakao.maps.LatLng(rawPath[i][1], rawPath[i][0]));
+            }
+        }
+
+        if (path.length < 3) {
+            return;
+        }
+
+        var polygon = new kakao.maps.Polygon({
+            map: map,
+            path: path,
+            strokeWeight: 2,
+            strokeColor: '#004c80',
+            strokeOpacity: 0.8,
+            fillColor: '#fff',
+            fillOpacity: 0.1
+        });
+
+        // 마우스 오버 효과
+        kakao.maps.event.addListener(polygon, 'mouseover', function() {
+            polygon.setOptions({
+                fillColor: '#09f',
+                fillOpacity: 0.3,
+                strokeWeight: 3
+            });
+        });
+
+        kakao.maps.event.addListener(polygon, 'mouseout', function() {
+            polygon.setOptions({
+                fillColor: '#fff',
+                fillOpacity: 0.1,
+                strokeWeight: 2
+            });
+        });
+
+        // 클릭 이벤트
+        kakao.maps.event.addListener(polygon, 'click', function() {
+            if (currentInfowindow) {
+                currentInfowindow.close();
+            }
+
+            // 속성 찾기 (대소문자 구분 없이)
+            const jibun = props.jibun || props.JIBUN || props.addr || props.ADDR || '정보없음';
+            const pnu = props.pnu || props.PNU || '';
+            
+            var content = `
+                <div style="padding:10px; min-width:150px;">
+                    <strong>지번:</strong> ${jibun}<br>
+                    ${pnu ? '<strong>PNU:</strong> ' + pnu + '<br>' : ''}
+                </div>
+            `;
+            
+            currentInfowindow = new kakao.maps.InfoWindow({
+                position: path[0],
+                content: content,
+                removable: true
+            });
+            
+            currentInfowindow.open(map);
+        });
+
+        polygons.push(polygon);
+    }
+
+    // 기존 폴리곤 삭제
+    function removePolygons() {
+        for (var i = 0; i < polygons.length; i++) {
+            polygons[i].setMap(null);
+        }
+        polygons = [];
+        
+        if (currentInfowindow) {
+            currentInfowindow.close();
+            currentInfowindow = null;
+        }
+    }
+
+    // ==========================================
+    // 8. 디바운스 함수
+    // ==========================================
+    function debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+            const later = () => {
+                clearTimeout(timeout);
+                func(...args);
+            };
+            clearTimeout(timeout);
+            timeout = setTimeout(later, wait);
+        };
+    }
+
+    // ==========================================
+    // 9. 이벤트 등록
+    // ==========================================
+    const debouncedGetData = debounce(getData, 800);
+
+    kakao.maps.event.addListener(map, 'dragend', debouncedGetData);
+    kakao.maps.event.addListener(map, 'zoom_changed', function() {
+        document.getElementById('zoomLevel').textContent = map.getLevel();
+        debouncedGetData();
+    });
+
+    // 최초 1회 실행
+    console.log("=== 초기화 완료, 데이터 로드 시작 ===");
+    getData(); 
+
+</script>
+</body>
+</html>

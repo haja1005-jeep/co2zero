@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>스마트 탄소중립 트리맵 (Kakao)</title>
+    <style>
+        body { margin: 0; padding: 0; font-family: 'Noto Sans KR', sans-serif; overflow: hidden; }
+        
+        /* 1. 지도 전체 화면 */
+        #map { width: 100vw; height: 100vh; z-index: 1; }
+
+        /* 2. 대시보드 패널 (좌측 상단) - 디자인 유지 */
+        .dashboard-panel {
+            position: absolute; top: 20px; left: 20px; width: 300px;
+            background: rgba(20, 30, 48, 0.9);
+            color: #fff; padding: 20px; border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5); z-index: 10; /* 카카오맵 위에 오도록 z-index 조정 */
+            backdrop-filter: blur(5px);
+        }
+        .panel-title { font-size: 18px; font-weight: bold; margin-bottom: 15px; border-bottom: 1px solid #444; padding-bottom: 10px; }
+        .stat-item { margin-bottom: 15px; }
+        .stat-label { font-size: 12px; color: #aaa; }
+        .stat-value { font-size: 24px; font-weight: bold; color: #00e676; }
+        .stat-unit { font-size: 14px; color: #fff; }
+
+        /* 3. 인포윈도우 스타일 (커스텀 오버레이) */
+        .info-window {
+            background: #fff; padding: 10px; border-radius: 8px;
+            border: 1px solid #ccc; box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            font-size: 12px; min-width: 150px;
+        }
+        .info-title { font-weight: bold; color: #333; margin-bottom: 5px; font-size: 14px;}
+
+
+		/* 인포윈도우 커스텀 스타일 */
+.iw-container {
+    padding: 5px;
+    width: 200px;
+    font-family: 'Noto Sans KR', sans-serif;
+}
+.iw-header {
+    font-size: 14px;
+    font-weight: bold;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 8px;
+    margin-bottom: 8px;
+    color: #333;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.iw-status {
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: #fff;
+}
+.iw-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 4px;
+}
+.iw-carbon-box {
+    margin-top: 10px;
+    background-color: #e8f5e9; /* 연한 초록 배경 */
+    padding: 8px;
+    border-radius: 6px;
+    text-align: center;
+}
+.iw-carbon-label {
+    font-size: 11px;
+    color: #2e7d32;
+    margin-bottom: 2px;
+}
+.iw-carbon-value {
+    font-size: 16px;
+    font-weight: 800; /* 매우 굵게 */
+    color: #00c853;   /* 진한 초록색 */
+}
+    </style>
+</head>
+<body>
+
+    <div class="dashboard-panel">
+        <div class="panel-title">🌳 스마트 탄소 관제 (Kakao)</div>
+        <div class="stat-item">
+            <div class="stat-label">관리 중인 수목</div>
+            <span id="stat-tree-count" class="stat-value">0</span> <span class="stat-unit">그루</span>
+        </div>
+        <div class="stat-item">
+            <div class="stat-label">실시간 탄소 흡수량</div>
+            <span id="stat-carbon" class="stat-value">0</span> <span class="stat-unit">kg/년</span>
+        </div>
+        <div class="stat-item">
+            <div class="stat-label">승용차 상쇄 효과</div>
+            <span id="stat-cars" class="stat-value" style="color:#29b6f6;">0</span> <span class="stat-unit">대 분량</span>
+        </div>
+    </div>
+
+    <div id="map"></div>
+
+    <script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey=257fdd3647dd6abdb05eae8681106514&libraries=clusterer,services"></script>
+
+    <script>
+
+	
+        // 1. 카카오 지도 생성
+        var container = document.getElementById('map');
+        var options = {
+            center: new kakao.maps.LatLng(37.5665, 126.9780), // 서울 시청 중심
+            level: 3 // 확대 레벨 (작을수록 확대)
+        };
+        var map = new kakao.maps.Map(container, options);
+
+// 1. 브이월드(V-World) 지적도 타일 레이어 설정
+// (브이월드 API 키가 없어도 타일 이미지는 무료로 호출 가능합니다)
+var cadastralLayer = new kakao.maps.Tileset({
+    url: 'https://api.vworld.kr/req/wmts/1.0.0/ACEB012E-C384-3176-BC45-4D4CAE466B1E/LP_PA_CBND_BUBUN/{z}/{y}/{x}.png', 
+    // 주의: 실제 서비스 시엔 본인의 V-World API Key를 발급받아 넣는 것이 안정적입니다.
+    // 테스트용 무료 키(데모) 혹은 키 없이 호출되는지 확인 필요.
+    // 만약 키 없이 안 된다면, 카카오맵 자체 지적도 기능을 쓰는 게 더 쉽습니다.
+});
+
+// [대안] 카카오맵 자체 지적도 레이어 사용하기 (가장 쉬운 방법)
+// 복잡한 V-World 연동 없이 카카오가 제공하는 지적도를 바로 켭니다.
+function toggleCadastral() {
+    // 지적편집도 레이어 추가/삭제 토글
+    if (map.getMapTypeId() === kakao.maps.MapTypeId.USE_DISTRICT) {
+        map.removeOverlayMapTypeId(kakao.maps.MapTypeId.USE_DISTRICT); // 끄기
+    } else {
+        map.addOverlayMapTypeId(kakao.maps.MapTypeId.USE_DISTRICT);    // 켜기
+    }
+}
+
+// 2. 지도 위에 [지적도 On/Off] 버튼 만들기
+var btnControl = document.createElement('div');
+btnControl.style.cssText = 'position:absolute; top:10px; right:10px; z-index:999;';
+btnControl.innerHTML = `
+    <button onclick="toggleCadastral()" style="
+        background:#fff; border:1px solid #ccc; padding:8px 12px; 
+        border-radius:4px; font-weight:bold; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.2);">
+        🗺️ 지적도 보기
+    </button>
+`;
+document.body.appendChild(btnControl);
+
+
+
+
+
+        // 지도 타입 컨트롤 (스카이뷰/일반지도 전환)
+        var mapTypeControl = new kakao.maps.MapTypeControl();
+        map.addControl(mapTypeControl, kakao.maps.ControlPosition.TOPRIGHT);
+
+        // 줌 컨트롤
+        var zoomControl = new kakao.maps.ZoomControl();
+        map.addControl(zoomControl, kakao.maps.ControlPosition.RIGHT);
+
+        // 2. PHP API 데이터 가져오기 및 마커 표시
+        async function loadTreeData() {
+            try {
+                // 앞서 만든 PHP 파일 호출
+                const response = await fetch('api_trees.php'); 
+                const data = await response.json();
+
+                // 2-1. 대시보드 숫자 업데이트
+                document.getElementById('stat-tree-count').innerText = data.stats.total_trees;
+                document.getElementById('stat-carbon').innerText = data.stats.total_carbon;
+                document.getElementById('stat-cars').innerText = data.stats.car_equivalent;
+
+                // 2-2. 마커 생성 및 표시
+                data.features.forEach(feature => {
+                    // GeoJSON 좌표는 [경도, 위도] 순서
+                    var lat = feature.geometry.coordinates[1];
+                    var lng = feature.geometry.coordinates[0];
+                    var props = feature.properties;
+
+                    // 마커 이미지 커스텀 (상태에 따라 다른 이미지 사용 가능)
+                    // 여기서는 기본 마커를 사용하되, 필요시 markerImage 옵션 사용
+                    var markerPosition  = new kakao.maps.LatLng(lat, lng); 
+                    var marker = new kakao.maps.Marker({
+                        position: markerPosition
+                    });
+
+                    marker.setMap(map); // 지도에 올리기
+
+
+
+// 2-3. 마커 클릭 이벤트 (인포윈도우) 수정 부분
+var statusColor = props.status === 'healthy' ? '#00c853' : '#ff3d00';
+var statusText = props.status === 'healthy' ? '양호' : '관리필요';
+
+// HTML 문자열 생성 (백틱 `` 사용)
+var iwContent = `
+    <div class="iw-container">
+        <div class="iw-header">
+            <span>🌲 ${props.species}</span>
+            <span class="iw-status" style="background-color:${statusColor}">${statusText}</span>
+        </div>
+
+        <div class="iw-row">
+            <span>흉고직경</span>
+            <span>${props.dbh} cm</span>
+        </div>
+        <div class="iw-row">
+            <span>수고(키)</span>
+            <span>${props.height || '-'} m</span>
+        </div>
+
+        <div class="iw-carbon-box">
+            <div class="iw-carbon-label">🌱 연간 이산화탄소 흡수량</div>
+            <div class="iw-carbon-value">${props.co2} kg</div>
+        </div>
+    </div>
+`;
+
+// 인포윈도우 생성 시 padding 옵션 제거 (CSS로 제어하기 위해)
+var infowindow = new kakao.maps.InfoWindow({
+    content : iwContent,
+    removable : true
+});
+
+kakao.maps.event.addListener(marker, 'click', function() {
+    infowindow.open(map, marker);
+});
+
+
+                });
+
+            } catch (error) {
+                console.error('데이터 로딩 실패:', error);
+            }
+        }
+
+
+
+
+// 수종별 한글 이름 매핑
+const speciesName = {
+    'pine': '🌲 소나무',
+    'zelkova': '🌳 느티나무',
+    'ginkgo': '🍂 은행나무',
+    'cherry': '🌸 벚나무',
+    'default': '🌱 기타'
+};
+
+async function loadZoneData() {
+    try {
+        const response = await fetch('api_zones.php');
+        const zones = await response.json();
+
+        zones.forEach(zone => {
+            // 1. 폴리곤 경로(Path) 변환 (GeoJSON -> Kakao LatLng)
+            // GeoJSON Polygon은 [[[lng, lat], ...]] 3중 배열 구조임
+            var path = zone.geometry.coordinates[0].map(coord => {
+                return new kakao.maps.LatLng(coord[1], coord[0]); // [위도, 경도] 순서 주의
+            });
+
+            // 2. 폴리곤 그리기
+            var polygon = new kakao.maps.Polygon({
+                map: map,
+                path: path, 
+                strokeWeight: 2,
+                strokeColor: '#004c80', // 테두리 색 (진한 파랑)
+                strokeOpacity: 0.8,
+                fillColor: '#00c853',   // 채우기 색 (녹색)
+                fillOpacity: 0.3        // 반투명
+            });
+
+            // 3. 통계 데이터 HTML 만들기 (리스트 형태)
+            let statsHtml = '';
+            let stats = zone.properties.stats;
+            
+            // "소나무: 10, 벚나무: 20" 형태로 루프 돌리기
+            for (let [code, count] of Object.entries(stats)) {
+                let name = speciesName[code] || code;
+                statsHtml += `
+                    <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                        <span>${name}</span>
+                        <span style="font-weight:bold;">${count}주</span>
+                    </div>`;
+            }
+
+            // 4. 커스텀 오버레이 (클릭 시 상세 정보)
+            var content = `
+                <div style="
+                    padding:15px; background:white; border-radius:8px; 
+                    box-shadow:0 2px 10px rgba(0,0,0,0.3); min-width:180px;">
+                    <h4 style="margin:0 0 10px 0; color:#333;">📍 ${zone.properties.name}</h4>
+                    <div style="font-size:12px; color:#555; border-top:1px solid #eee; padding-top:10px;">
+                        ${statsHtml}
+                    </div>
+                    <div style="margin-top:10px; padding-top:10px; border-top:1px dashed #ddd; font-weight:bold; color:#00c853;">
+                        총 수목: ${zone.properties.total_trees} 그루
+                    </div>
+                </div>
+            `;
+
+            var overlay = new kakao.maps.CustomOverlay({
+                content: content,
+                map: null, // 처음엔 숨김
+                position: path[0] // 폴리곤의 첫 번째 좌표에 표시
+            });
+
+            // 이벤트: 폴리곤 클릭 시 오버레이 표시/숨김
+            kakao.maps.event.addListener(polygon, 'click', function() {
+                if (overlay.getMap()) {
+                    overlay.setMap(null);
+                } else {
+                    overlay.setMap(map);
+                }
+            });
+            
+            // 호버 효과 (마우스 올리면 진해짐)
+            kakao.maps.event.addListener(polygon, 'mouseover', function() {
+                polygon.setOptions({fillOpacity: 0.6});
+            });
+            kakao.maps.event.addListener(polygon, 'mouseout', function() {
+                polygon.setOptions({fillOpacity: 0.3});
+            });
+        });
+
+    } catch (error) {
+        console.error('구역 데이터 로딩 실패:', error);
+    }
+}
+
+// 기존 나무 로딩 함수 뒤에 실행
+loadTreeData(); 
+loadZoneData(); // 추가된 함수 실행
+
+		
+    </script>
+</body>
+</html>
