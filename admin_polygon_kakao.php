@@ -160,8 +160,7 @@
     // ==========================================
     const VWORLD_KEY = 'ACEB012E-C384-3176-BC45-4D4CAE466B1E'; 
     const TREE_MARKER_SRC = 'https://cdn-icons-png.flaticon.com/512/489/489969.png'; 
-    const MAX_ZOOM_LEVEL = 5; // 지적도 표시 최대 줌 레벨
-
+    
     var mapContainer = document.getElementById('map'),
         mapOption = { center: new kakao.maps.LatLng(34.8118, 126.4057), level: 3 };
     var map = new kakao.maps.Map(mapContainer, mapOption);
@@ -169,21 +168,14 @@
     var ps = new kakao.maps.services.Places();
     var geocoder = new kakao.maps.services.Geocoder();
 
-    // 현재 선택된(저장할) 구역 관련 변수
     var currentPolygon = null;
     var currentPathData = [];
     var currentMarker = null;
-
-    // 지적편집도(VWorld 오버레이) 관련 변수
     var useDistrict = false;
-    var vworldPolygons = []; // 화면에 그려진 파란색 지적도 폴리곤들
-    var hoverOverlay = null;
-    var isVWorldLoading = false;
-    
     var searchMarkers = []; 
 
     // ==========================================
-    // 1. 공통 유틸리티 (마커, 좌표 변환)
+    // 1. 공통 유틸리티 (마커, 지도 타입)
     // ==========================================
     function updateMarker(position) {
         if (currentMarker) { currentMarker.setMap(null); }
@@ -197,13 +189,9 @@
             map: map,
             image: markerImage
         });
-        
         map.panTo(position);
     }
 
-    // ==========================================
-    // 2. 지도 컨트롤 (일반/위성/지적도)
-    // ==========================================
     function setMapType(maptype) {
         var roadmapBtn = document.getElementById('btnRoadmap');
         var skyviewBtn = document.getElementById('btnSkyview'); 
@@ -219,268 +207,202 @@
         }
     }
 
-    // ★★★ [핵심 수정] 지적편집도 토글 기능 통합 ★★★
     function toggleDistrict() {
         useDistrict = !useDistrict;
         var btn = document.getElementById('btnUseDistrict');
         
         if (useDistrict) {
+            map.addOverlayMapTypeId(kakao.maps.MapTypeId.USE_DISTRICT);
             btn.classList.add('active');
-            // 지적도 모드 활성화 시: 줌 레벨 조정 및 데이터 로드 시작
-            if(map.getLevel() > 3) map.setLevel(2);
-            
-            getVWorldDataAll(); // 초기 로드
-
-            // 이벤트 리스너 등록 (드래그, 줌 변경 시 데이터 다시 불러오기)
-            kakao.maps.event.addListener(map, 'dragend', debouncedGetData);
-            kakao.maps.event.addListener(map, 'zoom_changed', debouncedGetData);
-            
-            alert("🔲 지적도 모드가 켜졌습니다.\n지도에 구획이 표시되면 원하는 땅을 클릭하세요.");
+            if(map.getLevel() > 4) map.setLevel(3); // 지적도가 잘 보이게 줌인
         } else {
+            map.removeOverlayMapTypeId(kakao.maps.MapTypeId.USE_DISTRICT);
             btn.classList.remove('active');
-            // 지적도 모드 비활성화: 오버레이 제거
-            removeVWorldPolygons();
-            
-            // 이벤트 리스너 제거
-            kakao.maps.event.removeListener(map, 'dragend', debouncedGetData);
-            kakao.maps.event.removeListener(map, 'zoom_changed', debouncedGetData);
         }
     }
 
     // ==========================================
-    // 3. 지도 클릭 이벤트 (일반 모드일 때만 동작)
+    // 2. 지도 클릭 이벤트 (데이터 요청)
     // ==========================================
     kakao.maps.event.addListener(map, 'click', function(mouseEvent) {
-        // 지적도 모드가 켜져있을 때는 개별 폴리곤 클릭 이벤트가 처리하므로 여기선 무시하거나 보조 역할
-        // 하지만 빈 공간(데이터 없음)을 클릭했을 때를 대비해 유지할 수도 있음.
-        if (useDistrict) return; 
-
         var latlng = mouseEvent.latLng;
-        processClickLocation(latlng);
         
-        // 기존 방식: 클릭 지점 기준으로 VWorld 데이터 1개만 요청 (백업용)
-        getSingleVWorldData(latlng.getLng(), latlng.getLat());
-    });
-
-    function processClickLocation(latlng) {
+        // 1. 마커 찍기
         updateMarker(latlng);
+        
+        // 2. 주소 가져오기 (이름 자동입력용)
         geocoder.coord2Address(latlng.getLng(), latlng.getLat(), function(result, status) {
             if (status === kakao.maps.services.Status.OK) {
                 var addr = result[0].address.address_name;
                 document.getElementById('zoneName').value = addr;
             }
         });
-    }
 
-    // ==========================================
-    // 4. VWorld 지적도 (전체 보기 & 단일 선택)
-    // ==========================================
-    
-    // 4-1. Debounce (과도한 API 호출 방지)
-    function debounce(func, wait) {
-        let timeout;
-        return function(...args) {
-            clearTimeout(timeout);
-            timeout = setTimeout(() => func.apply(this, args), wait);
-        };
-    }
-    const debouncedGetData = debounce(getVWorldDataAll, 800);
+        // 3. VWorld 지적도 데이터 요청 (폴리곤 따기용)
+        getVWorldData(latlng.getLng(), latlng.getLat());
+    });
 
-    // 4-2. 화면 내 모든 지적도 데이터 가져오기 (two.html 로직)
-    function getVWorldDataAll() {
-        if (!useDistrict) return;
-        
-        const currentLevel = map.getLevel();
-        if (currentLevel > MAX_ZOOM_LEVEL) {
-            removeVWorldPolygons();
-            return;
-        }
-
-        if (isVWorldLoading) return;
-        isVWorldLoading = true;
-        $('#mapLoading').show();
-
-        var bounds = map.getBounds();
-        var sw = bounds.getSouthWest();
-        var ne = bounds.getNorthEast();
-        var bbox = `${sw.getLng()},${sw.getLat()},${ne.getLng()},${ne.getLat()}`;
-
+    function getVWorldData(lng, lat) {
+        // 클릭한 지점 주변의 데이터를 요청
+        const bbox = `${parseFloat(lng)-0.0001},${parseFloat(lat)-0.0001},${parseFloat(lng)+0.0001},${parseFloat(lat)+0.0001}`;
         const params = {
             service: 'WFS', version: '2.0.0', request: 'GetFeature',
             typeName: 'lp_pa_cbnd_bubun', srsName: 'EPSG:4326',
-            bbox: bbox, output: 'text/javascript', format_options: 'callback:parseVWorldAll',
-            exceptions: 'text/javascript', key: VWORLD_KEY
+            bbox: bbox, output: 'text/javascript', format_options: 'callback:parseVWorldData',
+            key: VWORLD_KEY
         };
-
         const url = "https://api.vworld.kr/req/wfs?" + $.param(params);
         
-        // 기존 스크립트 제거 후 새로 추가
-        $('#vworld-all-script').remove();
+        $('#vworld-script').remove();
         const script = document.createElement('script');
         script.src = url;
-        script.id = 'vworld-all-script';
-        script.onerror = function() { isVWorldLoading = false; $('#mapLoading').hide(); };
+        script.id = 'vworld-script';
+        script.onerror = function() { alert("⚠️ VWorld 서버 연결 오류"); };
         document.head.appendChild(script);
     }
 
-    window.parseVWorldAll = function(data) {
-        isVWorldLoading = false;
-        $('#mapLoading').hide();
-        removeVWorldPolygons(); // 기존 파란 폴리곤 삭제
+    // ==========================================
+    // 3. VWorld 데이터 응답 처리 (핵심 로직)
+    // ==========================================
+    window.parseVWorldData = function(data) {
+        // 기존 폴리곤 삭제
+        if (currentPolygon) currentPolygon.setMap(null); 
+        currentPathData = [];
+        $('#selectionInfo').hide();
 
         let features = data.features;
         if (!features && data.response) features = data.response.result.featureCollection.features;
 
-        if (!features || features.length === 0) return;
+        if (!features || features.length === 0) {
+            console.log("선택된 위치에 지적도 데이터 없음");
+            return;
+        }
 
-        features.forEach(function(feature) {
-            drawVWorldPolygon(feature);
-        });
-    };
+        // 클릭한 위치 가져오기
+        const markerPos = currentMarker.getPosition();
+        const clickLng = markerPos.getLng();
+        const clickLat = markerPos.getLat();
 
-    // 4-3. 지적도 폴리곤 그리기 (파란색 오버레이)
-    function drawVWorldPolygon(feature) {
-        var geometry = feature.geometry;
-        var props = feature.properties;
+        // ★ [핵심] 클릭한 점을 포함하는 정확한 필지 찾기 (Ray Casting)
+        let selectedFeature = null;
 
-        if (!geometry || !geometry.coordinates) return;
+        for (const f of features) {
+            const g = f.geometry;
+            let ring = null;
 
-        var rawPath = [];
-        if (geometry.type === 'Polygon') rawPath = geometry.coordinates[0];
-        else if (geometry.type === 'MultiPolygon') rawPath = geometry.coordinates[0][0];
+            if (g.type === 'Polygon') {
+                ring = g.coordinates[0];
+            } else if (g.type === 'MultiPolygon') {
+                ring = g.coordinates[0][0];
+            }
 
-        if (rawPath.length < 3) return;
+            if (!ring) continue;
 
-        var path = [];
-        rawPath.forEach(pt => path.push(new kakao.maps.LatLng(pt[1], pt[0])));
-
-        // 화면에 보여줄 파란색 폴리곤
-        var polygon = new kakao.maps.Polygon({
-            map: map, path: path,
-            strokeWeight: 1, strokeColor: '#004c80', strokeOpacity: 0.6,
-            fillColor: '#fff', fillOpacity: 0.1
-        });
-
-        // 호버 이벤트
-        kakao.maps.event.addListener(polygon, 'mouseover', function(mouseEvent) {
-            polygon.setOptions({ fillColor: '#09f', fillOpacity: 0.4 });
-            const jibun = props.jibun || props.addr || '지번모름';
-            const content = `<div class="custom-overlay">${jibun}</div>`;
+            // 좌표 포맷 변환 ([lng, lat] 배열 -> 객체 배열)
+            const polygonRing = ring.map(p => ({ x: p[0], y: p[1] }));
             
-            if(hoverOverlay) hoverOverlay.setMap(null);
-            hoverOverlay = new kakao.maps.CustomOverlay({
-                position: mouseEvent.latLng, content: content, yAnchor: 1
-            });
-            hoverOverlay.setMap(map);
-        });
+            // 점이 폴리곤 안에 있는지 검사
+            if (isPointInPolygon({ x: clickLng, y: clickLat }, polygonRing)) {
+                selectedFeature = f;
+                break; // 찾았으면 루프 종료
+            }
+        }
 
-        kakao.maps.event.addListener(polygon, 'mouseout', function() {
-            polygon.setOptions({ fillColor: '#fff', fillOpacity: 0.1 });
-            if(hoverOverlay) { hoverOverlay.setMap(null); hoverOverlay = null; }
-        });
+        // 못 찾았으면 첫 번째 데이터 사용 (Fallback)
+        if (!selectedFeature) {
+            selectedFeature = features[0];
+        }
 
-        // ★ 클릭 이벤트: 이 구역을 "선택" 처리함
-        kakao.maps.event.addListener(polygon, 'click', function(mouseEvent) {
-            // 1. 빨간색 선택 폴리곤으로 변환
-            selectPolygonFromFeature(feature);
-            
-            // 2. 마커 이동 및 주소 찾기
-            var latlng = mouseEvent.latLng; // 클릭한 위치
-            updateMarker(latlng);
-            
-            // 3. 폼 데이터 채우기 (VWorld 속성 활용)
-            const addr = props.addr || props.jibun || '주소 정보 없음';
-            document.getElementById('zoneName').value = addr;
-        });
+        const feature = selectedFeature;
+        const props = feature.properties;
+        const geometry = feature.geometry;
 
-        vworldPolygons.push(polygon);
-    }
-
-    function removeVWorldPolygons() {
-        vworldPolygons.forEach(p => p.setMap(null));
-        vworldPolygons = [];
-        if(hoverOverlay) { hoverOverlay.setMap(null); }
-    }
-
-    // 4-4. 선택 처리 (빨간색 폴리곤 생성 및 정보창 업데이트)
-    function selectPolygonFromFeature(feature) {
-        if (currentPolygon) currentPolygon.setMap(null);
-        currentPathData = [];
-        $('#selectionInfo').hide();
-
-        var geometry = feature.geometry;
-        var props = feature.properties;
-
-        // 좌표 추출
-        let rawPath = [];
-        if (geometry.type === 'Polygon') rawPath = geometry.coordinates[0];
-        else if (geometry.type === 'MultiPolygon') rawPath = geometry.coordinates[0][0];
-
-        let path = [];
-        rawPath.forEach(pt => {
-            path.push(new kakao.maps.LatLng(pt[1], pt[0]));
-            currentPathData.push({lng: pt[0], lat: pt[1]});
-        });
-
-        // 빨간색 선택 폴리곤 그리기
-        currentPolygon = new kakao.maps.Polygon({
-            map: map, path: path,
-            strokeWeight: 3, strokeColor: '#ff0000', strokeOpacity: 0.8,
-            fillColor: '#ff0000', fillOpacity: 0.3
-        });
-
-        // 정보창 업데이트
+        // 정보창 표시
         const addr = props.addr || props.jibun || props.pnu || '주소 정보 없음';
         const jimokCode = props.jimok_text || props.ldcgdr_nm || '';
+        
         let jimok = "정보없음";
+        let isRoad = false;
         let badgeClass = "badge-park";
 
         if (jimokCode) {
             if (jimokCode.includes('도로') || jimokCode === '도') {
-                jimok = "도로 (Road)"; badgeClass = "badge-road";
-                alert("⚠️ 주의: '도로'를 선택하셨습니다.");
+                jimok = "도로 (Road)"; isRoad = true; badgeClass = "badge-road";
             } else if (jimokCode.includes('공원') || jimokCode === '원') {
                 jimok = "공원 (Park)";
+            } else if (jimokCode.includes('전') || jimokCode.includes('답')) {
+                jimok = "전/답 (Field)";
             } else {
                 jimok = jimokCode;
+            }
+        } else {
+            if (addr.includes('도') && !addr.includes('동')) { 
+                jimok = "도로 (Road)"; isRoad = true; badgeClass = "badge-road";
             }
         }
 
         $('#infoAddr').text(addr);
         $('#infoJimok').html(`<span class="badge ${badgeClass}">${jimok}</span>`);
         $('#infoArea').text(props.calc_area ? Math.round(props.calc_area) + "㎡" : "정보없음");
-        
-        // 마커가 있다면 좌표 표시
-        if(currentMarker) {
-            const pos = currentMarker.getPosition();
-            $('#infoCoord').text(`${pos.getLat().toFixed(6)}, ${pos.getLng().toFixed(6)}`);
-        }
-        
+        $('#infoCoord').text(`${clickLat.toFixed(6)}, ${clickLng.toFixed(6)}`);
         $('#selectionInfo').fadeIn();
-    }
 
-    // 4-5. (구버전) 단일 클릭 시 가져오기 - 일반 지도 모드용
-    function getSingleVWorldData(lng, lat) {
-        const bbox = `${parseFloat(lng)-0.0001},${parseFloat(lat)-0.0001},${parseFloat(lng)+0.0001},${parseFloat(lat)+0.0001}`;
-        const params = {
-            service: 'WFS', version: '2.0.0', request: 'GetFeature',
-            typeName: 'lp_pa_cbnd_bubun', srsName: 'EPSG:4326',
-            bbox: bbox, output: 'text/javascript', format_options: 'callback:parseSingleVWorld',
-            key: VWORLD_KEY
-        };
-        $.getScript("https://api.vworld.kr/req/wfs?" + $.param(params));
-    }
+        if (isRoad) alert("⚠️ 주의: '도로'를 선택하셨습니다.\n공원을 등록하려면 도로 안쪽 녹지를 클릭하세요.");
 
-    window.parseSingleVWorld = function(data) {
-        let features = data.features;
-        if (!features && data.response) features = data.response.result.featureCollection.features;
-        if (!features || features.length === 0) return;
-        
-        selectPolygonFromFeature(features[0]);
+        // ★ [핵심] 빨간색 폴리곤 그리기
+        let rawPath = [];
+        if (geometry.type === 'Polygon') rawPath = geometry.coordinates[0];
+        else if (geometry.type === 'MultiPolygon') rawPath = geometry.coordinates[0][0];
+
+        let path = [];
+        rawPath.forEach(pt => {
+            // 카카오맵 그리기용
+            path.push(new kakao.maps.LatLng(pt[1], pt[0]));
+            // DB 저장용 (경도, 위도)
+            currentPathData.push({lng: pt[0], lat: pt[1]});
+        });
+
+        currentPolygon = new kakao.maps.Polygon({
+            map: map,
+            path: path,
+            strokeWeight: 3, 
+            strokeColor: '#ff0000', // 🔴 빨간색 테두리
+            strokeOpacity: 0.8, 
+            fillColor: '#ff0000',   // 🔴 빨간색 채우기
+            fillOpacity: 0.3
+        });
     };
 
+    // [보조 함수] 점이 다각형 안에 있는지 검사 (Ray Casting 알고리즘)
+    function isPointInPolygon(p, polygon) {
+        let isInside = false;
+        let minX = polygon[0].x, maxX = polygon[0].x;
+        let minY = polygon[0].y, maxY = polygon[0].y;
+        
+        for (let n = 1; n < polygon.length; n++) {
+            let q = polygon[n];
+            minX = Math.min(q.x, minX);
+            maxX = Math.max(q.x, maxX);
+            minY = Math.min(q.y, minY);
+            maxY = Math.max(q.y, maxY);
+        }
+
+        if (p.x < minX || p.x > maxX || p.y < minY || p.y > maxY) {
+            return false;
+        }
+
+        let i = 0, j = polygon.length - 1;
+        for (i, j; i < polygon.length; j = i++) {
+            if ( (polygon[i].y > p.y) != (polygon[j].y > p.y) &&
+                    p.x < (polygon[j].x - polygon[i].x) * (p.y - polygon[i].y) / (polygon[j].y - polygon[i].y) + polygon[i].x ) {
+                isInside = !isInside;
+            }
+        }
+        return isInside;
+    }
+
     // ==========================================
-    // 5. 통합 검색
+    // 4. 통합 검색
     // ==========================================
     function searchUnified() {
         const keyword = $('#keyword').val().trim();
@@ -511,7 +433,8 @@
             listEl.append(li);
 
             const marker = new kakao.maps.Marker({
-                position: new kakao.maps.LatLng(place.y, place.x), map: map
+                position: new kakao.maps.LatLng(place.y, place.x),
+                map: map
             });
             searchMarkers.push(marker);
             kakao.maps.event.addListener(marker, 'click', function() { selectSearchPlace(place); });
@@ -525,20 +448,14 @@
         
         updateMarker(position);
         $('#zoneName').val(place.place_name);
-        
-        // 검색 장소로 이동 후 지적도 데이터 확인
-        if(useDistrict) {
-            getVWorldDataAll();
-        } else {
-            getSingleVWorldData(place.x, place.y);
-        }
+        getVWorldData(place.x, place.y); // 검색 위치의 지적도 데이터 요청
         
         searchMarkers.forEach(marker => marker.setMap(null));
         searchMarkers = [];
     }
 
     // ==========================================
-    // 6. 사진 GPS (EXIF)
+    // 5. 사진 GPS (EXIF)
     // ==========================================
     function handlePhoto(input) {
         if (!input.files || !input.files[0]) return;
@@ -559,11 +476,8 @@
             const position = new kakao.maps.LatLng(latitude, longitude);
 
             updateMarker(position);
+            getVWorldData(longitude, latitude);
             
-            // 사진 위치로 이동 시 지적도 데이터 로드
-            if(useDistrict) getVWorldDataAll();
-            else getSingleVWorldData(longitude, latitude);
-
             geocoder.coord2Address(longitude, latitude, function(result, status) {
                 if (status === kakao.maps.services.Status.OK) {
                     $('#zoneName').val(result[0].address.address_name);
@@ -581,7 +495,7 @@
     }
 
     // ==========================================
-    // 7. 저장 및 초기화
+    // 6. 저장 및 초기화
     // ==========================================
     function savePolygon() {
         const name = $('#zoneName').val().trim();
@@ -623,16 +537,12 @@
         $('#keyword').val('');
         $('#placesList').hide().empty();
         $('#selectionInfo').hide();
-        
-        // 지적편집도 모드 초기화
-        if (useDistrict) toggleDistrict();
-        
         map.setCenter(new kakao.maps.LatLng(34.8118, 126.4057));
         map.setLevel(3);
     }
     
     $(document).ready(function() {
-        console.log('시스템 초기화 완료');
+        console.log('스마트 지적도 구역 등록 시스템 초기화 완료');
     });
 </script>
 </body>
