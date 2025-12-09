@@ -1,57 +1,129 @@
+-- phpMyAdmin SQL Dump
+-- version 5.2.2
+-- https://www.phpmyadmin.net/
+--
+-- 호스트: localhost
+-- 생성 시간: 25-12-09 07:23
+-- 서버 버전: 10.2.44-MariaDB-log
+-- PHP 버전: 8.3.17
+
+SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
+START TRANSACTION;
+SET time_zone = "+00:00";
+
+
+/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
+/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
+/*!40101 SET NAMES utf8mb4 */;
+
+--
+-- 데이터베이스: `im4u798`
+--
+
+-- --------------------------------------------------------
+
+--
+-- 테이블 구조 `smart_trees`
+--
+
+DROP TABLE IF EXISTS `smart_trees`;
 CREATE TABLE `smart_trees` (
-    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,    
-    `species_code` VARCHAR(50) NOT NULL COMMENT '수종 코드 (예: pine, zelkova)',
-    `tree_name` VARCHAR(100) COMMENT '나무 별명/관리명',    
-    `dbh` DECIMAL(5,2) NOT NULL COMMENT '흉고직경(cm): 가슴 높이 지름',
-    `height` DECIMAL(5,2) NOT NULL COMMENT '수고(m): 나무 키',
-    `age_class` INT COMMENT '수령(나이)',
-    -- [위치 데이터] 공간 인덱스 적용 (핵심!)
-    `coordinates` POINT NOT NULL COMMENT '위도/경도 (WGS84)',    
-    `status` ENUM('healthy', 'warning', 'danger', 'dead') DEFAULT 'healthy' COMMENT '건강 상태',
-    `last_checked_at` DATETIME COMMENT '마지막 점검일',    
-    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    -- [인덱스] 지도 검색 속도를 위한 필수 설정
-    SPATIAL INDEX `sp_index_coordinates` (`coordinates`), 
-    INDEX `idx_species` (`species_code`)
+  `id` bigint(20) UNSIGNED NOT NULL,
+  `species_code` varchar(50) NOT NULL COMMENT '수종 코드 (예: pine, zelkova)',
+  `tree_name` varchar(100) DEFAULT NULL COMMENT '나무 별명/관리명',
+  `dbh` decimal(5,2) NOT NULL COMMENT '흉고직경(cm): 가슴 높이 지름',
+  `height` decimal(5,2) NOT NULL COMMENT '수고(m): 나무 키',
+  `age_class` int(11) DEFAULT NULL COMMENT '수령(나이)',
+  `coordinates` point NOT NULL COMMENT '위도/경도 (WGS84)',
+  `status` enum('healthy','warning','danger','dead') DEFAULT 'healthy' COMMENT '건강 상태',
+  `last_checked_at` datetime DEFAULT NULL COMMENT '마지막 점검일',
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  `tree_count` int(11) DEFAULT 1 COMMENT '나무 수량',
+  `image_path` varchar(255) DEFAULT NULL COMMENT '나무 사진 경로'
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 
+--
+-- 테이블의 덤프 데이터 `smart_trees`
+--
 
+INSERT INTO `smart_trees` (`id`, `species_code`, `tree_name`, `dbh`, `height`, `age_class`, `coordinates`, `status`, `last_checked_at`, `created_at`, `updated_at`, `tree_count`, `image_path`) VALUES
+(15, 'pine', NULL, 16.00, 6.00, NULL, 0x00000000010100000029e249bf12995f40dc1f9a759e674140, 'healthy', '2025-12-09 03:50:12', '2025-12-08 18:50:12', '2025-12-08 18:50:12', 30, NULL),
+(11, 'zelkova', NULL, 25.00, 15.00, NULL, 0x0000000001010000001dad132892995f40e127834617684140, 'healthy', '2025-12-09 02:41:04', '2025-12-08 17:22:49', '2025-12-08 17:41:04', 10, 'uploads/1765215663_1472.jpg'),
+(5, 'cherry', NULL, 10.00, 2.00, NULL, 0x0000000001010000002b4b871a067d5f401795f48d0c5a4140, 'healthy', '2025-12-09 00:50:57', '2025-12-08 15:50:57', '2025-12-08 15:50:57', 1, NULL),
+(6, 'zelkova', NULL, 20.00, 10.00, NULL, 0x00000000010100000094cd3cc6077d5f405a457e03115a4140, 'healthy', '2025-12-09 00:51:16', '2025-12-08 15:51:16', '2025-12-08 15:51:16', 1, NULL),
+(7, 'pine', NULL, 18.00, 22.00, NULL, 0x000000000101000000156cf4d2047d5f407c44d0df095a4140, 'warning', '2025-12-09 00:51:35', '2025-12-08 15:51:35', '2025-12-08 15:51:35', 1, NULL),
+(8, 'zelkova', NULL, 20.00, 15.00, NULL, 0x00000000010100000051e03094b97b5f401b306e26f35a4140, 'healthy', '2025-12-09 00:52:03', '2025-12-08 15:52:03', '2025-12-08 15:52:03', 1, NULL);
+
+-- --------------------------------------------------------
+
+--
+-- 테이블 구조 `zones`
+--
+
+DROP TABLE IF EXISTS `zones`;
 CREATE TABLE `zones` (
-    `id` INT AUTO_INCREMENT PRIMARY KEY,
-    `name` VARCHAR(100) NOT NULL COMMENT '구역명',
-    `type` VARCHAR(50) COMMENT '구역 타입 (park, street, forest)',
-    
-    -- [핵심 변경] POLYGON 대신 GEOMETRY 사용 (선, 면 모두 저장 가능)
-    `zone_geom` GEOMETRY NOT NULL  COMMENT '공간 데이터',
-    
-    -- [추가된 관리 항목]
-    `total_distance` INT DEFAULT 0 COMMENT '거리(m) - 가로수길용',
-    `est_tree_count` INT DEFAULT 0 COMMENT '예상 수량 - 가로수길용',
-    `start_point` VARCHAR(100),
-    `end_point` VARCHAR(100),
-    
-    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
-    -- 공간 인덱스 (검색 속도 필수)
-    SPATIAL INDEX `sp_index_geom` (`zone_geom`)
+  `id` int(11) NOT NULL,
+  `name` varchar(100) NOT NULL COMMENT '구역명',
+  `type` varchar(50) DEFAULT NULL COMMENT '구역 타입 (park, street, forest)',
+  `zone_geom` geometry NOT NULL COMMENT '공간 데이터',
+  `total_distance` int(11) DEFAULT 0 COMMENT '거리(m) - 가로수길용',
+  `est_tree_count` int(11) DEFAULT 0 COMMENT '예상 수량 - 가로수길용',
+  `start_point` varchar(100) DEFAULT NULL,
+  `end_point` varchar(100) DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp()
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
 
--- [테스트 데이터] 서울 시청 광장 주변을 '시청 공원'으로 설정
-INSERT INTO `zones` (`name`, `type`, `zone_geom`)
-VALUES (
-    '서울 시청 광장 숲',
-    'park',
-    ST_GeomFromText(
-        'POLYGON((126.9778 37.5668, 126.9784 37.5668, 126.9784 37.5662, 126.9778 37.5662, 126.9778 37.5668))'
-    )
-);
+--
+-- 테이블의 덤프 데이터 `zones`
+--
 
-INSERT INTO zones (name, type, zone_geom, total_distance, est_tree_count) 
-VALUES (
-    '용해-연산 가로수길', 
-    'street', 
-    ST_GeomFromText('LINESTRING(126.3 34.8, 126.4 34.9)'),
-    2300, -- 2.3km
-    280   -- 280그루
-);
+INSERT INTO `zones` (`id`, `name`, `type`, `zone_geom`, `total_distance`, `est_tree_count`, `start_point`, `end_point`, `created_at`) VALUES
+(6, '전남 신안군 비금면 가산리 381', 'park', 0x000000000103000000010000000d000000d65f6523867e5f403497237dbd624140a08e22c6867e5f406314db0fbe62414058946d3b887e5f40aad7a9c9be6241407d61ae1c8c7e5f4006c036eaba624140d48ae37e8f7e5f406d974fb9b6624140dc760c55927e5f403a206c25b262414054a9fa11967e5f40fbe5b423ac624140ffc85b4b947e5f403e3a3b3aaa6241405627eb60927e5f40fdbb808fa862414018586c38917e5f4099363533a7624140aa54fd088b7e5f40c92a9df6b1624140c7fc378a877e5f4037170314b8624140d65f6523867e5f403497237dbd624140, 0, 0, NULL, NULL, '2025-12-08 13:03:25'),
+(7, '전남 신안군 도초면 발매리 1448', 'park', 0x000000000103000000010000000500000061945632b67b5f40215ef0ccf85a414004dbf3c2be7b5f401b71b7daf95a41408a2f0363b77b5f40fc2e1114e45a4140cc53880db77b5f40e99c5dc6e65a414061945632b67b5f40215ef0ccf85a4140, 0, 0, NULL, NULL, '2025-12-08 13:05:03'),
+(10, '전남 신안군 도초면 수항리 1425-2', 'park', 0x0000000001030000000100000014000000ee8a8d37017d5f40e7930d520d5a414008887237027d5f40dbfc5cc00d5a41402efad026037d5f40b649c99b115a414004ea0754037d5f40d36ffcdc125a414046c6d58e037d5f40660ff61e155a41406e75ef97057d5f40c58ea593155a41404d2036a2057d5f40e4744820145a41403e245be1067d5f407e2ee086145a41400edef4ba077d5f40e50fe58f125a41409c527f390a7d5f4018fd91b7165a414066b58673097d5f400285b4a5125a4140eff7512e097d5f40166bfae40f5a4140d5907e1c097d5f40e19e42090e5a4140cc668a10097d5f40cabed0c80c5a41402cec71f8077d5f40c56ada620a5a4140d902c623067d5f4020643822085a414081add880047d5f40ea5fed83075a4140b450d77f027d5f403cfba9750b5a4140f0c69b5f017d5f405e5c70270d5a4140ee8a8d37017d5f40e7930d520d5a4140, 0, 0, NULL, NULL, '2025-12-08 13:51:42'),
+(11, '전라남도 신안군 비금면 가산리 101-17', 'park', 0x000000000103000000010000000a0000000a368500a67f5f40e41be11f7c6141409ac2f7bcaa7f5f40145b62e17b614140b400afc7ab7f5f4027827a2b7961414077885ecaa97f5f40ec841b19796141402a8d98d9a77f5f40396e6379786141401f7ec4d0a67f5f406f56afe877614140b1726020a57f5f404cdf8c167761414085a4e40fa57f5f40cfb95f2e77614140a8b06bdea57f5f4092c3501c7a6141400a368500a67f5f40e41be11f7c614140, 0, 0, NULL, NULL, '2025-12-08 14:42:50'),
+(12, '목포시 용당로 가로수길', 'street', 0x00000000010200000009000000758e938c91995f40f21febf3116841402145e02699995f408dce1f17396841404b1faefa9d995f40622b69de53684140c0704b0b99995f40ce03cd826f684140dfe18e3f90995f40ce9e78669a684140c3b073608d995f40ef61b2ceb46841400b06afb587995f40fb778250ed684140365d9af372995f40d47db91739694140870c22d05c995f40569f649f88694140, 1347, 168, NULL, NULL, '2025-12-08 15:02:40'),
+(13, '도초면사무소', 'park', 0x0000000001030000000100000014000000ee8a8d37017d5f40e7930d520d5a414008887237027d5f40dbfc5cc00d5a41402efad026037d5f40b649c99b115a414004ea0754037d5f40d36ffcdc125a414046c6d58e037d5f40660ff61e155a41406e75ef97057d5f40c58ea593155a41404d2036a2057d5f40e4744820145a41403e245be1067d5f407e2ee086145a41400edef4ba077d5f40e50fe58f125a41409c527f390a7d5f4018fd91b7165a414066b58673097d5f400285b4a5125a4140eff7512e097d5f40166bfae40f5a4140d5907e1c097d5f40e19e42090e5a4140cc668a10097d5f40cabed0c80c5a41402cec71f8077d5f40c56ada620a5a4140d902c623067d5f4020643822085a414081add880047d5f40ea5fed83075a4140b450d77f027d5f403cfba9750b5a4140f0c69b5f017d5f405e5c70270d5a4140ee8a8d37017d5f40e7930d520d5a4140, 0, 0, NULL, NULL, '2025-12-08 15:08:53'),
+(14, '도초 팽나무 10리길', 'park', 0x0000000001020000000800000041848337b77b5f40417f9a0be45a41409d2e8955987b5f40776723f1875a4140762fb8f0947b5f409baa17876b5a41405ba515289e7b5f4069e9bb82d1594140b1b11226a77b5f40b393c6de91594140c16343c7257b5f407cfe8150155941406304b871757b5f403df1407859594140595dac4e8f7b5f403ed0641510594140, 2827, 353, NULL, NULL, '2025-12-08 15:20:32');
+
+--
+-- 덤프된 테이블의 인덱스
+--
+
+--
+-- 테이블의 인덱스 `smart_trees`
+--
+ALTER TABLE `smart_trees`
+  ADD PRIMARY KEY (`id`),
+  ADD SPATIAL KEY `sp_index_coordinates` (`coordinates`),
+  ADD KEY `idx_species` (`species_code`);
+
+--
+-- 테이블의 인덱스 `zones`
+--
+ALTER TABLE `zones`
+  ADD PRIMARY KEY (`id`),
+  ADD SPATIAL KEY `sp_index_geom` (`zone_geom`);
+
+--
+-- 덤프된 테이블의 AUTO_INCREMENT
+--
+
+--
+-- 테이블의 AUTO_INCREMENT `smart_trees`
+--
+ALTER TABLE `smart_trees`
+  MODIFY `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=16;
+
+--
+-- 테이블의 AUTO_INCREMENT `zones`
+--
+ALTER TABLE `zones`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=15;
+COMMIT;
+
+/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
+/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
+/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
