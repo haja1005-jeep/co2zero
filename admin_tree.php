@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>관리자 - 개별 수목 등록</title>
+    <title>관리자 - 개별 수목 등록 (검색 기능 추가)</title>
     <style>
         body { margin:0; padding:0; display:flex; height:100vh; font-family: 'Noto Sans KR', sans-serif; }
         
@@ -29,7 +29,7 @@
         
         .btn { width: 100%; padding: 12px; border: none; border-radius: 4px; color: white; cursor: pointer; font-size: 14px; margin-top: 5px; font-weight: bold; transition: 0.2s;}
         .btn-primary { background: #28a745; }
-        .btn-warning { background: #fd7e14; display: none; } /* 수정 버튼 (초기엔 숨김) */
+        .btn-warning { background: #fd7e14; display: none; } 
         .btn-danger { background: #dc3545; margin-top: 5px; } 
         .btn-reset { background: #6c757d; margin-top: 5px; }
         .btn:hover { opacity: 0.9; }
@@ -48,6 +48,22 @@
         .legend-item { display: flex; align-items: center; margin-bottom: 5px; }
         .color-box { width: 15px; height: 15px; margin-right: 8px; display: inline-block; border-radius: 3px;}
         
+        /* ★ 검색 결과 리스트 스타일 추가 */
+        #searchResult {
+            list-style: none; padding: 0; margin: 5px 0 15px 0;
+            max-height: 150px; overflow-y: auto;
+            border: 1px solid #ddd; border-radius: 4px; background: white;
+            display: none; /* 초기엔 숨김 */
+        }
+        #searchResult li {
+            padding: 8px 10px; border-bottom: 1px solid #eee; cursor: pointer; font-size: 13px;
+        }
+        #searchResult li:hover { background: #e3f2fd; }
+        #searchResult li:last-child { border-bottom: none; }
+        .badge { display: inline-block; font-size: 10px; padding: 2px 5px; border-radius: 3px; color: white; margin-right: 5px;}
+        .bg-park { background: #28a745; }
+        .bg-street { background: #6f42c1; }
+
         /* 모바일 최적화 */
         @media (max-width: 768px) {
             body { flex-direction: column; }
@@ -65,10 +81,20 @@
 <div id="sidebar">
     <h2 id="formTitle" style="margin-top:0;">🌲 개별 수목 심기</h2>
     
+    <div class="form-group" style="border-bottom: 2px solid #ddd;">
+        <label>🔍 구역/가로수길 찾기</label>
+        <div style="display:flex; gap:5px;">
+            <input type="text" id="searchKeyword" placeholder="예: 용당, 중앙로" onkeypress="if(event.key==='Enter') searchZone()">
+            <button class="btn" style="width:60px; margin-top:0; background:#004c80;" onclick="searchZone()">이동</button>
+        </div>
+        <ul id="searchResult"></ul>
+    </div>
+
     <div class="form-group">
         <label>📍 선택된 위치 (자동)</label>
         <div class="coord-box" id="coordDisplay">지도를 클릭하세요</div>
-        <input type="hidden" id="treeId"> <input type="hidden" id="treeLat">
+        <input type="hidden" id="treeId">
+        <input type="hidden" id="treeLat">
         <input type="hidden" id="treeLng">
         <input type="text" id="address" placeholder="주소 (자동 입력)" readonly style="background:#f1f3f5;">
     </div>
@@ -138,8 +164,8 @@
     <div class="legend">
         <div class="legend-item"><span class="color-box" style="background:rgba(0, 200, 83, 0.4); border:1px solid #004c80;"></span> 등록된 공원</div>
         <div class="legend-item"><span class="color-box" style="background:#8e44ad; opacity:0.6;"></span> 등록된 가로수길</div>
-        <div class="legend-item"><img src="https://cdn-icons-png.flaticon.com/512/489/489969.png" width="15" style="margin-right:8px;"> 심을 나무</div>
-        <div class="legend-item"><img src="https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/marker_red.png" width="15" style="margin-right:8px;"> 기존 나무</div>
+        <div class="legend-item"><img src="https://cdn-icons-png.flaticon.com/512/490/490091.png" width="15" style="margin-right:8px;"> 심을 나무</div>
+        <div class="legend-item"><img src="https://cdn-icons-png.flaticon.com/512/489/489969.png" width="15" style="margin-right:8px;"> 기존 나무</div>
     </div>
 </div>
 
@@ -147,18 +173,18 @@
 <script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey=257fdd3647dd6abdb05eae8681106514&libraries=services"></script>
 
 <script>
-    // [수정됨] 심을 나무(초록) vs 기존 나무(빨강) 아이콘 구분
-    const TREE_ICON = 'https://cdn-icons-png.flaticon.com/512/489/489969.png';
-    const OLD_TREE_ICON = 'https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/marker_red.png';
+    const TREE_ICON = 'https://cdn-icons-png.flaticon.com/512/490/490091.png';
+    const OLD_TREE_ICON = 'https://cdn-icons-png.flaticon.com/512/489/489969.png';
 
     var mapContainer = document.getElementById('map'),
-        mapOption = { center: new kakao.maps.LatLng(34.8118, 126.4057), level: 3 };
+        mapOption = { center: new kakao.maps.LatLng(34.811678, 126.392322), level: 4 };
     var map = new kakao.maps.Map(mapContainer, mapOption);
     var geocoder = new kakao.maps.services.Geocoder();
 
     var currentMarker = null; 
     var existingMarkers = []; 
     var zonePolygons = []; 
+    var zoneDataList = []; // 검색을 위해 불러온 구역 데이터 저장
 
     function setMapType(maptype) {
         var roadmapBtn = document.getElementById('btnRoadmap');
@@ -185,19 +211,17 @@
         }
     }
 
-    // 통합 클릭 핸들러 (지도 빈 곳 or 구역 위 클릭 시 실행)
     function onMapClick(latlng) {
-        resetForm(); // 기존 선택 해제 (중요: 신규 등록 모드로 전환)
-        
+        resetForm(); 
         if (!currentMarker) {
             currentMarker = new kakao.maps.Marker({
                 position: latlng, 
                 map: map,
-                image: new kakao.maps.MarkerImage(TREE_ICON, new kakao.maps.Size(40, 40), {offset: new kakao.maps.Point(20, 40)})
+                image: new kakao.maps.MarkerImage(TREE_ICON, new kakao.maps.Size(40, 40), {offset: new kakao.maps.Point(40, 40)})
             });
         } else {
             currentMarker.setPosition(latlng);
-            currentMarker.setMap(map); // 다시 보이게
+            currentMarker.setMap(map);
         }
 
         $('#treeLat').val(latlng.getLat());
@@ -215,9 +239,9 @@
         onMapClick(mouseEvent.latLng);
     });
 
-    // 데이터 로드
+    // 3. 데이터 로드 (검색용 리스트 확보)
     function loadData() {
-        // 기존 나무 불러오기
+        // 기존 나무 로드
         $.ajax({
             url: 'api_trees.php',
             type: 'GET',
@@ -234,28 +258,25 @@
                             position: new kakao.maps.LatLng(lat, lng),
                             map: map,
                             title: props.species,
-                            // [수정됨] 기존 나무는 빨간 마커 사용
-                            image: new kakao.maps.MarkerImage(OLD_TREE_ICON, new kakao.maps.Size(24, 35))
+                            image: new kakao.maps.MarkerImage(OLD_TREE_ICON, new kakao.maps.Size(40, 40))
                         });
-
-                        // ★ 기존 나무 클릭 시 -> 수정 모드로 전환
                         kakao.maps.event.addListener(marker, 'click', function() {
                             selectTreeForEdit(props);
                         });
-
                         existingMarkers.push(marker);
                     });
                 }
             }
         });
 
-        // 구역 로드
+        // 구역 로드 & 검색 데이터 저장
         $.ajax({
             url: 'api_zones.php',
             type: 'GET',
             success: function(zones) {
                 zonePolygons.forEach(p => p.setMap(null));
                 zonePolygons = [];
+                zoneDataList = []; // 초기화
 
                 if (!Array.isArray(zones)) return;
 
@@ -263,48 +284,80 @@
                     var geoType = zone.geometry.type;
                     var coords = zone.geometry.coordinates;
                     var props = zone.properties;
+                    var centerPos = null;
 
+                    // 검색용 데이터 저장
                     if (geoType === 'Polygon') {
                         var path = coords[0].map(c => new kakao.maps.LatLng(c[1], c[0]));
                         var polygon = new kakao.maps.Polygon({
-                            map: map, path: path,
-                            strokeWeight: 2, strokeColor: '#004c80', strokeOpacity: 0.8,
-                            fillColor: '#00c853', fillOpacity: 0.3
+                            map: map, path: path, strokeWeight: 2, strokeColor: '#004c80',
+                            strokeOpacity: 0.8, fillColor: '#00c853', fillOpacity: 0.3
                         });
-                        kakao.maps.event.addListener(polygon, 'click', function(mouseEvent) {
-                            onMapClick(mouseEvent.latLng);
-                        });
+                        kakao.maps.event.addListener(polygon, 'click', function(mouseEvent) { onMapClick(mouseEvent.latLng); });
                         zonePolygons.push(polygon);
+                        centerPos = path[0]; // 이동 좌표 (임시)
 
                     } else if (geoType === 'LineString') {
                         var path = coords.map(c => new kakao.maps.LatLng(c[1], c[0]));
                         var polyline = new kakao.maps.Polyline({
-                            map: map, path: path,
-                            strokeWeight: 10, strokeColor: '#8e44ad', strokeOpacity: 0.5,
-                            strokeStyle: 'solid'
+                            map: map, path: path, strokeWeight: 10, strokeColor: '#8e44ad',
+                            strokeOpacity: 0.5, strokeStyle: 'solid'
                         });
-                        kakao.maps.event.addListener(polyline, 'click', function(mouseEvent) {
-                            onMapClick(mouseEvent.latLng);
-                        });
+                        kakao.maps.event.addListener(polyline, 'click', function(mouseEvent) { onMapClick(mouseEvent.latLng); });
                         zonePolygons.push(polyline);
+                        centerPos = path[Math.floor(path.length/2)]; // 중간 지점
                     }
+
+                    // 리스트에 추가
+                    zoneDataList.push({
+                        name: props.name,
+                        type: props.type, // 'park' or 'street'
+                        position: centerPos
+                    });
                 });
             },
             error: function(e) { console.error("구역 로드 실패:", e); }
         });
     }
 
-    // 수정 모드 세팅
+    // ★ 검색 기능 구현
+    function searchZone() {
+        var keyword = $('#searchKeyword').val().trim();
+        var resultBox = $('#searchResult');
+        resultBox.empty().hide();
+
+        if (keyword === '') { alert("검색어를 입력하세요."); return; }
+
+        var results = zoneDataList.filter(z => z.name.includes(keyword));
+
+        if (results.length === 0) {
+            alert("검색 결과가 없습니다.");
+            return;
+        }
+
+        results.forEach(z => {
+            var badgeClass = z.type === 'street' ? 'bg-street' : 'bg-park';
+            var typeName = z.type === 'street' ? '길' : '공원';
+            
+            var li = $(`<li><span class="badge ${badgeClass}">${typeName}</span> ${z.name}</li>`);
+            li.on('click', function() {
+                map.panTo(z.position); // 지도 이동
+                map.setLevel(3); // 줌인
+                resultBox.hide();
+            });
+            resultBox.append(li);
+        });
+        resultBox.show();
+    }
+
     function selectTreeForEdit(props) {
         if(currentMarker) currentMarker.setMap(null); 
-
         $('#treeId').val(props.id);
         $('#species').val(props.species);
         $('#dbh').val(props.dbh);
         $('#height').val(props.height);
         $('#treeCount').val(props.count);
         $('#status').val(props.status);
-        
         $('#coordDisplay').text("선택된 나무 ID: " + props.id);
         $('#formTitle').text("✏️ 나무 정보 수정");
 
@@ -314,18 +367,12 @@
         } else {
             $('#previewArea').hide();
         }
-
-        // 버튼 상태 변경 (ID가 있으므로 정상 작동)
-        $('#btnSave').hide();
-        $('#btnUpdate').show();
-        $('#btnDelete').show();
+        $('#btnSave').hide(); $('#btnUpdate').show(); $('#btnDelete').show();
     }
 
-    // 저장 (Create)
     function saveTree() {
         if(!validateForm()) return;
         var formData = getFormData();
-        
         $.ajax({
             url: 'save_tree.php', type: 'POST', data: formData,
             processData: false, contentType: false, dataType: 'json',
@@ -336,14 +383,11 @@
         });
     }
 
-    // 수정 (Update)
     function updateTree() {
         if(!validateForm()) return;
         var formData = getFormData();
         formData.append('id', $('#treeId').val()); 
-
         if(!confirm("정보를 수정하시겠습니까?")) return;
-
         $.ajax({
             url: 'update_tree.php', type: 'POST', data: formData,
             processData: false, contentType: false, dataType: 'json',
@@ -354,15 +398,12 @@
         });
     }
 
-    // 삭제 (Delete)
     function deleteTree() {
         var id = $('#treeId').val();
         if(!id) return;
-        if(!confirm("정말 이 나무를 삭제하시겠습니까? (복구 불가)")) return;
-
+        if(!confirm("정말 삭제하시겠습니까?")) return;
         $.ajax({
-            url: 'delete_tree.php', type: 'POST', data: {id: id},
-            dataType: 'json',
+            url: 'delete_tree.php', type: 'POST', data: {id: id}, dataType: 'json',
             success: function(res) {
                 if(res.success) { alert("🗑️ 삭제 완료"); resetForm(); loadData(); }
                 else alert("실패: " + res.error);
@@ -379,10 +420,8 @@
         formData.append('height', $('#height').val());
         formData.append('status', $('#status').val());
         formData.append('tree_count', $('#treeCount').val());
-        
         var photo = $('#photo')[0].files[0];
         if(photo) formData.append('photo', photo);
-        
         return formData;
     }
 
@@ -392,7 +431,6 @@
         return true;
     }
 
-    // 초기화
     function resetForm() {
         $('#formTitle').text("🌲 나무 심기 (등록)");
         $('#treeId').val('');
@@ -400,12 +438,7 @@
         $('#coordDisplay').text('지도를 클릭하세요');
         $('#dbh').val(''); $('#height').val(''); $('#treeCount').val('1');
         $('#photo').val(''); $('#previewArea').hide();
-        
-        // 버튼 상태 초기화 (ID 추가로 정상 작동)
-        $('#btnSave').show();
-        $('#btnUpdate').hide();
-        $('#btnDelete').hide();
-        
+        $('#btnSave').show(); $('#btnUpdate').hide(); $('#btnDelete').hide();
         if(currentMarker) currentMarker.setMap(null);
     }
 
